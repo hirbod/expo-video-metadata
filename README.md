@@ -4,7 +4,7 @@ Provides a function that let you get some metadata from video files, like the du
 
 # Installation in bare React Native projects
 
-This package needs **Expo SDK 50** or **higher**, as it uses FileSystem APIs that were added in that version. This package adds native code to your project and does not work with Expo Go. Please use a custom dev client or build a standalone app.
+This package needs **Expo SDK 50** or **higher**, as it uses FileSystem APIs that were added in that version. This package adds native code to your project and does not work with Expo Go. Please use a custom dev client or build a standalone app. Works with Fabric. Needs RN 0.73+ (Java JDK 17)
 
 For bare React Native projects, you must ensure that you have [installed and configured the `expo` package](https://docs.expo.dev/bare/installing-expo-modules/) before continuing (SDK 50+). This just adds ~150KB to your final app size and is the easiest way to get started and it works with and without Expo projects.
 
