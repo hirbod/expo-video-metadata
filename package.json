@@ -19,7 +19,12 @@
     "react-native",
     "expo",
     "expo-video-metadata",
-    "ExpoVideoMetadata"
+    "ExpoVideoMetadata",
+    "react native",
+    "video module",
+    "video metadata",
+    "video",
+    "metadata"
   ],
   "repository": "https://github.com/hirbod/expo-video-metadata",
   "bugs": {
