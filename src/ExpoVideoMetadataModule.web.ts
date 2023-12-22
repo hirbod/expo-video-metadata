@@ -1,13 +1,16 @@
-import { EventEmitter } from 'expo-modules-core';
-
-const emitter = new EventEmitter({} as any);
+import type {
+  VideoInfoOptions,
+  VideoInfoResult,
+} from "./ExpoVideoMetadata.types";
 
 export default {
-  PI: Math.PI,
-  async setValueAsync(value: string): Promise<void> {
-    emitter.emit('onChange', { value });
+  get name(): string {
+    return "ExpoVideoMetadata";
   },
-  hello() {
-    return 'Hello world! 👋';
+  async getVideoInfoAsync(
+    sourceFilename: string,
+    options: VideoInfoOptions = {}
+  ): Promise<VideoInfoResult> {
+    throw new Error("ExpoVideoMetadata not supported on Expo Web yet");
   },
 };
