@@ -40,14 +40,6 @@ export type VideoInfoResult = {
     | "LandscapeRight"
     | "LandscapeLeft";
   /**
-   * Is video playable.
-   */
-  isPlayable: boolean;
-  /**
-   * Is video exportable.
-   */
-  isExportable: boolean;
-  /**
    * Audio sample rate of the video in samples per second.
    */
   audioSampleRate: number;
