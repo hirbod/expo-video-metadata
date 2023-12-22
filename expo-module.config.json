@@ -1,9 +1,0 @@
-{
-  "platforms": ["ios", "android", "web"],
-  "ios": {
-    "modules": ["ExpoVideoMetadataModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.videometadata.ExpoVideoMetadataModule"]
-  }
-}
