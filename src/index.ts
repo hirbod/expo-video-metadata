@@ -7,7 +7,7 @@ export { VideoInfoOptions, VideoInfoResult };
 // and on native platforms to ExpoVideoMetadata.ts
 
 /**
- * Create an image thumbnail from video provided via `sourceFilename`.
+ * Retrieves video metadata.
  *
  * @param sourceFilename An URI of the video, local or remote.
  * @param options Pass `headers` object in case `sourceFilename` is a remote URI, e.g { headers: "Authorization": "Bearer some-token" } etc.
@@ -16,7 +16,7 @@ export { VideoInfoOptions, VideoInfoResult };
  */
 export async function getVideoInfoAsync(
   sourceFilename: string,
-  options: VideoInfoOptions = {},
+  options: VideoInfoOptions = {}
 ): Promise<VideoInfoResult> {
   return await ExpoVideoMetadataModule.getVideoInfo(sourceFilename, options);
 }

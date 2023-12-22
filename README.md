@@ -28,14 +28,20 @@ No additional set up necessary.
 import { getVideoInfoAsync } from 'expo-video-metadata';
 
 /**
- * Gets metadata from a video file.
+ * Retrieves video metadata.
+ *
  * @param sourceFilename An URI of the video, local or remote.
- * @return Returns a promise that resolves to a `VideoInfoResult` object.
+ * @param options Pass `headers` object in case `sourceFilename` is a remote URI, e.g { headers: "Authorization": "Bearer some-token" } etc.
+ *
+ * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
-const videoInfo = await getVideoInfoAsync(sourceFileName: string): Promise<VideoInfo>;
 
+const result = await getVideoInfoAsync(
+  sourceFilename: string,
+  options: VideoInfoOptions = {},
+): Promise<VideoInfoResult> {
+  return await ExpoVideoMetadataModule.getVideoInfo(sourceFilename, options);
+}
 ```
 
-# Info
-
-I am planning to add more metadata to the result object. If you need something specific, please open an issue or a PR.
+See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/b9239224eed46f455b2fb9f1b29e69ac49da6683/src/ExpoVideoMetadata.types.ts#L1) type for more information.
