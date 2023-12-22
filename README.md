@@ -2,6 +2,8 @@
 
 Provides a function that let you get some metadata from video files, like the duration, width, height, fps, codec, hasAudio, orientation, audioChannels, audioCodec, audioSampleRate etc. Check the exported types for more information. Web support is not available yet but it is planned.
 
+<video src="https://github.com/hirbod/expo-video-metadata/raw/assets/preview.mp4" width="500" height="200" playsinline muted autoplay />
+
 # Installation in bare React Native projects
 
 This package needs **Expo SDK 50** or **higher**, as it uses FileSystem APIs that were added in that version. This package adds native code to your project and does not work with Expo Go. Please use a custom dev client or build a standalone app. Works with Fabric. Needs RN 0.73+ (Java JDK 17)
