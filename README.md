@@ -38,12 +38,7 @@ import { getVideoInfoAsync } from 'expo-video-metadata';
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
 
-const result = await getVideoInfoAsync(
-  sourceFilename: string,
-  options: VideoInfoOptions = {},
-): Promise<VideoInfoResult> {
-  return await ExpoVideoMetadataModule.getVideoInfo(sourceFilename, options);
-}
+const result = await getVideoInfoAsync(sourceFilename: string, options: VideoInfoOptions = {}): Promise<VideoInfoResult>
 ```
 
 See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/b9239224eed46f455b2fb9f1b29e69ac49da6683/src/ExpoVideoMetadata.types.ts#L1) type for more information.
