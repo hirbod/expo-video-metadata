@@ -37,6 +37,7 @@ export type VideoInfoResult = {
   orientation:
     | "Portrait"
     | "PortraitUpsideDown"
+    | "Landscape"
     | "LandscapeRight"
     | "LandscapeLeft";
   /**

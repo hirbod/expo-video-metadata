@@ -23,7 +23,7 @@ PODS:
     - React-NativeModulesApple
     - React-RCTAppDelegate
     - ReactCommon/turbomodule/core
-  - ExpoVideoMetadata (0.1.0):
+  - ExpoVideoMetadata (1.1.0):
     - ExpoModulesCore
   - FBLazyVector (0.73.1)
   - FBReactNativeSpec (0.73.1):
@@ -1276,7 +1276,7 @@ SPEC CHECKSUMS:
   ExpoImagePicker: 66970181d1c838f444e5e1f81b804ab2d5ff49bd
   ExpoKeepAwake: ed71bfe0e6ecd38e337586ba6e1ba27a56eb373b
   ExpoModulesCore: 01c0abfa6cd9c41c4bd76d8a1a079e6b591db10f
-  ExpoVideoMetadata: 8b548869f09edc6ff42824a44c60955d884dee6e
+  ExpoVideoMetadata: 4b481a66c0c85d1cdfe36e66227d3a6f5240e7c0
   FBLazyVector: 2296bacb2fa157a43991048b0a9d71c1c8b65083
   FBReactNativeSpec: df0ebe69acd14ce0be0269cf75b6e338a727259b
   fmt: ff9d55029c625d3757ed641535fd4a75fedc7ce9
