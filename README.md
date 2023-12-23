@@ -1,6 +1,6 @@
 # expo-video-metadata
 
-Provides a function that let you get some metadata from video files, like the duration, width, height, fps, codec, hasAudio, orientation, audioChannels, audioCodec, audioSampleRate etc. Check the exported types for more information. Web support is not available yet but it is planned.
+Provides a function that let you get some metadata from video files, like the duration, width, height, fps, codec, hasAudio, orientation, audioChannels, audioCodec, audioSampleRate etc. Check the exported types for more information. This library has web support but is limited to platform APIs and might not work on all browsers correctly.
 
 <img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview.png" width="500" />
 
