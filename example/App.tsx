@@ -29,7 +29,6 @@ export default function App() {
               if (result.canceled) {
                 return;
               }
-              console.log(result.assets[0]);
               const videoInfo = await getVideoInfoAsync(result.assets[0].uri);
               setResult(videoInfo);
             });
