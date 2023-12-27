@@ -1,6 +1,6 @@
 # expo-video-metadata
 
-Provides a function that let you get some metadata from video files, like the duration, width, height, fps, codec, hasAudio, orientation, audioChannels, audioCodec, audioSampleRate etc. Check the exported types for more information. This library has web support but is limited to platform APIs and might not work on all browsers correctly.
+This React Native (Expo) library provides a versatile function designed to extract a wide range of metadata from video files, including duration, width, height, frame rate, codec, audio availability, orientation, audio channels, audio codec, and audio sample rate. For comprehensive details, please refer to the listed exported types. Although the library is equipped with web support, its performance is reliant on specific platform APIs, leading to potential variability in its effectiveness across different browsers.
 
 <img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview.png" width="500" />
 
