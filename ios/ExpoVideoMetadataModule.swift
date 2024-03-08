@@ -30,6 +30,7 @@ public class ExpoVideoMetadataModule: Module {
     var width: Int = 0
     var height: Int = 0
     var frameRate: Float = 0.0
+    var isHDR: Bool? = nil
     var codec: String = ""
     var orientation: String = ""
     var audioSampleRate: Int = 0
@@ -63,6 +64,11 @@ public class ExpoVideoMetadataModule: Module {
       } else {
         orientation = (transform.a == 1.0) ? "LandscapeRight" : "LandscapeLeft"
       }
+
+      // HDR
+      if #available(iOS 14.0, *) {
+        isHDR = videoTrack.hasMediaCharacteristic(.containsHDRVideo)
+      }
     }
 
     // Audio track information
@@ -81,7 +87,7 @@ public class ExpoVideoMetadataModule: Module {
       }
     }
 
-    return [
+    var result: [String: Any] = [
       "duration": duration,
       "hasAudio": hasAudio,
       "fileSize": fileSize,
@@ -95,6 +101,12 @@ public class ExpoVideoMetadataModule: Module {
       "audioChannels": audioChannels,
       "audioCodec": audioCodec
     ]
+
+    if isHDR != nil {
+      result["isHDR"] = isHDR
+    }
+
+    return result
   }
 
   // Helper function to convert FourCC code to String

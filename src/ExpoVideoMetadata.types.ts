@@ -8,6 +8,10 @@ export type VideoInfoResult = {
    */
   hasAudio: boolean;
   /**
+   * Available only on iOS >= 14. Tells if the video is a HDR video.
+   */
+  isHDR: boolean;
+  /**
    * Width of the video in pixels.
    */
   width: number;
