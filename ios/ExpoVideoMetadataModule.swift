@@ -87,9 +87,10 @@ public class ExpoVideoMetadataModule: Module {
       }
     }
 
-    var result: [String: Any] = [
+    return [
       "duration": duration,
       "hasAudio": hasAudio,
+      "isHDR": isHDR,
       "fileSize": fileSize,
       "bitrate": bitrate,
       "fps": frameRate,
@@ -101,12 +102,6 @@ public class ExpoVideoMetadataModule: Module {
       "audioChannels": audioChannels,
       "audioCodec": audioCodec
     ]
-
-    if isHDR != nil {
-      result["isHDR"] = isHDR
-    }
-
-    return result
   }
 
   // Helper function to convert FourCC code to String
