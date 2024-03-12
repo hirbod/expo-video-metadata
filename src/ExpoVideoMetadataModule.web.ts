@@ -194,6 +194,7 @@ export default {
           hasAudio,
           audioSampleRate, // Not available
           audioChannels, // Not available
+          isHDR: null, // Not available
           audioCodec,
           codec: videoCodec,
           fps, // Not available
