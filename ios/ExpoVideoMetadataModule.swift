@@ -30,6 +30,7 @@ public class ExpoVideoMetadataModule: Module {
     var width: Int = 0
     var height: Int = 0
     var frameRate: Float = 0.0
+    var isHDR: Bool? = nil
     var codec: String = ""
     var orientation: String = ""
     var audioSampleRate: Int = 0
@@ -63,6 +64,11 @@ public class ExpoVideoMetadataModule: Module {
       } else {
         orientation = (transform.a == 1.0) ? "LandscapeRight" : "LandscapeLeft"
       }
+
+      // HDR
+      if #available(iOS 14.0, *) {
+        isHDR = videoTrack.hasMediaCharacteristic(.containsHDRVideo)
+      }
     }
 
     // Audio track information
@@ -84,6 +90,7 @@ public class ExpoVideoMetadataModule: Module {
     return [
       "duration": duration,
       "hasAudio": hasAudio,
+      "isHDR": isHDR,
       "fileSize": fileSize,
       "bitrate": bitrate,
       "fps": frameRate,

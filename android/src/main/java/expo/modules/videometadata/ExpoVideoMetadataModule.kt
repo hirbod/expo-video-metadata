@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 import android.media.MediaExtractor
+import android.media.MediaFeature
 import android.media.MediaFormat
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -69,6 +70,12 @@ class ExpoVideoMetadataModule : Module() {
           val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull()
           val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) != null
 
+          val colorTransfer = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
+          var isHDR: Boolean? = null
+          if (colorTransfer != null) {
+            isHDR = colorTransfer == MediaFormat.COLOR_TRANSFER_ST2084 || colorTransfer == MediaFormat.COLOR_TRANSFER_HLG
+          }
+
           // release
           retriever.release()
 
@@ -115,6 +122,7 @@ class ExpoVideoMetadataModule : Module() {
               "bitrate" to bitrate,
               "fileSize" to fileSize,
               "hasAudio" to hasAudio,
+              "isHDR" to isHDR,
               "audioCodec" to audioCodec,
               "orientation" to getOrientation(rotation),
               "audioSampleRate" to audioSampleRate,
