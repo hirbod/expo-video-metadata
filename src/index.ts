@@ -15,7 +15,7 @@ export { VideoInfoOptions, VideoInfoResult };
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
 export async function getVideoInfoAsync(
-  sourceFilename: string,
+  sourceFilename: string | File | Blob,
   options: VideoInfoOptions = {}
 ): Promise<VideoInfoResult> {
   return await ExpoVideoMetadataModule.getVideoInfo(sourceFilename, options);

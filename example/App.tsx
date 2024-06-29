@@ -3,6 +3,8 @@ import { VideoInfoResult, getVideoInfoAsync } from "expo-video-metadata";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { pickFile } from "./components/file-picker";
+
 export default function App() {
   const [result, setResult] = useState<VideoInfoResult | null>(null);
   return (
@@ -12,6 +14,7 @@ export default function App() {
           flexDirection: "row",
           justifyContent: "center",
           alignItems: "center",
+          flexWrap: "wrap",
           gap: 20,
         }}
       >
@@ -35,7 +38,27 @@ export default function App() {
           }}
         >
           <Text style={{ fontSize: 15, fontWeight: "bold", color: "white" }}>
-            Select Video
+            Select Video with ImagePicker by Expo
+          </Text>
+        </Pressable>
+        <Pressable
+          style={{
+            backgroundColor: "black",
+            borderRadius: 20,
+            padding: 20,
+            borderCurve: "continuous",
+          }}
+          onPress={async () => {
+            const videoFile = await pickFile({
+              mediaTypes: "video",
+            });
+            console.log(videoFile.file);
+            const videoInfo = await getVideoInfoAsync(videoFile.file);
+            setResult(videoInfo);
+          }}
+        >
+          <Text style={{ fontSize: 15, fontWeight: "bold", color: "white" }}>
+            Select Video with custom picker
           </Text>
         </Pressable>
         <Pressable

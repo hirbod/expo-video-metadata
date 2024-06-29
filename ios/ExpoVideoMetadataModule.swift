@@ -90,7 +90,7 @@ public class ExpoVideoMetadataModule: Module {
     return [
       "duration": duration,
       "hasAudio": hasAudio,
-      "isHDR": isHDR,
+      "isHDR": isHDR as Any,
       "fileSize": fileSize,
       "bitrate": bitrate,
       "fps": frameRate,
