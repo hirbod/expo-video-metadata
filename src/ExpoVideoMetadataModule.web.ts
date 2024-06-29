@@ -1,6 +1,7 @@
 import type {
   VideoInfoOptions,
   VideoInfoResult,
+  VideoSource,
 } from "./ExpoVideoMetadata.types";
 
 interface Track {
@@ -97,19 +98,16 @@ export default {
   },
 
   async getVideoInfo(
-    sourceFilename: string | File | Blob,
+    source: VideoSource,
     options: VideoInfoOptions = {}
   ): Promise<VideoInfoResult> {
     const video = document.createElement("video") as HTMLVideoElementWithTracks;
     let videoUrl = "";
 
-    if (typeof sourceFilename === "string") {
-      videoUrl = sourceFilename;
-    } else if (
-      sourceFilename instanceof File ||
-      sourceFilename instanceof Blob
-    ) {
-      videoUrl = URL.createObjectURL(sourceFilename);
+    if (typeof source === "string") {
+      videoUrl = source;
+    } else if (source instanceof File || source instanceof Blob) {
+      videoUrl = URL.createObjectURL(source);
     }
 
     Object.assign(video, {
@@ -125,7 +123,7 @@ export default {
       video.load();
       video.remove();
       // Revoke the object URL if it was created
-      if (sourceFilename instanceof File || sourceFilename instanceof Blob) {
+      if (source instanceof File || source instanceof Blob) {
         URL.revokeObjectURL(videoUrl);
       }
     };
@@ -151,8 +149,8 @@ export default {
         Boolean(video.webkitAudioDecodedByteCount);
 
       const fileSize =
-        sourceFilename instanceof File || sourceFilename instanceof Blob
-          ? sourceFilename.size
+        source instanceof File || source instanceof Blob
+          ? source.size
           : await this.getFileSize(videoUrl, options);
 
       const bitRate =

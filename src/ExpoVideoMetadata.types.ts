@@ -64,6 +64,8 @@ export type VideoInfoResult = {
   audioCodec: string;
 };
 
+export type VideoSource = string | File | Blob;
+
 export type VideoInfoOptions = {
   /**
    * In case `sourceFilename` is a remote URI, `headers` object is passed in a network request.
