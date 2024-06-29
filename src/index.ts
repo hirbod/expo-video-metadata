@@ -9,7 +9,7 @@ export { VideoInfoOptions, VideoInfoResult };
 /**
  * Retrieves video metadata.
  *
- * @param sourceFilename An URI of the video, local or remote.
+ * @param sourceFilename An URI of the video, local or remote. On web, it can be a File or Blob object, too. base64 URIs are supported but not recommended, as they can be very large and cause performance issues.
  * @param options Pass `headers` object in case `sourceFilename` is a remote URI, e.g { headers: "Authorization": "Bearer some-token" } etc.
  *
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).

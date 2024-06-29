@@ -124,6 +124,10 @@ export default {
       video.removeAttribute("src");
       video.load();
       video.remove();
+      // Revoke the object URL if it was created
+      if (sourceFilename instanceof File || sourceFilename instanceof Blob) {
+        URL.revokeObjectURL(videoUrl);
+      }
     };
 
     try {
@@ -176,9 +180,6 @@ export default {
       };
     } finally {
       resetVideo();
-      if (sourceFilename instanceof File || sourceFilename instanceof Blob) {
-        URL.revokeObjectURL(videoUrl);
-      }
     }
   },
 };
