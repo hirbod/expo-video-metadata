@@ -32,13 +32,13 @@ import { getVideoInfoAsync } from 'expo-video-metadata';
 /**
  * Retrieves video metadata.
  *
- * @param sourceFilename An URI of the video, local or remote.
+ * @param sourceFilename An URI of the video, local or remote. On web, it can be a File or Blob object, too. base64 URIs are supported but not recommended, as they can be very large and cause performance issues.
  * @param options Pass `headers` object in case `sourceFilename` is a remote URI, e.g { headers: "Authorization": "Bearer some-token" } etc.
  *
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
 
-const result = await getVideoInfoAsync(sourceFilename: string, options: VideoInfoOptions = {}): Promise<VideoInfoResult>
+const result = await getVideoInfoAsync(sourceFilename: string | File | Blob, options: VideoInfoOptions = {}): Promise<VideoInfoResult>
 ```
 
-See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/b9239224eed46f455b2fb9f1b29e69ac49da6683/src/ExpoVideoMetadata.types.ts#L1) type for more information.
+See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/main/src/ExpoVideoMetadata.types.ts#L1) type for more information.
