@@ -169,12 +169,13 @@ export default {
         fileSize,
         hasAudio,
         audioSampleRate,
-        isHDR: null,
+        isHDR: null, // not supported on web
         audioCodec: audioTrack?.label ?? "",
         codec: videoTrack?.label ?? "",
         audioChannels,
         fps,
         orientation: width >= height ? "Landscape" : "Portrait",
+        location: null, // not supported on web
       };
     } finally {
       resetVideo();

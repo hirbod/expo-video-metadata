@@ -41,7 +41,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - ExpoVideoMetadata (1.2.0):
+  - ExpoVideoMetadata (1.2.1):
     - ExpoModulesCore
   - FBLazyVector (0.74.2)
   - fmt (9.1.0)
@@ -1424,7 +1424,7 @@ SPEC CHECKSUMS:
   ExpoImagePicker: 756527d2fa339a7c9792a0602dcb9de4e4629037
   ExpoKeepAwake: 3b8815d9dd1d419ee474df004021c69fdd316d08
   ExpoModulesCore: 30e1ed4659356cb9a84e0e5ddf1d090d735973c1
-  ExpoVideoMetadata: 5366d273b7124397fffb9e98f95350d328ff2477
+  ExpoVideoMetadata: 643602a1c887fb5ad5e6c3329e92be513e430dc1
   FBLazyVector: 4bc164e5b5e6cfc288d2b5ff28643ea15fa1a589
   fmt: 4c2741a687cc09f0634a2e2c72a838b99f1ff120
   glog: fdfdfe5479092de0c4bdbebedd9056951f092c4f

@@ -62,6 +62,15 @@ export type VideoInfoResult = {
    * Audio codec of the video.
    */
   audioCodec: string;
+  /**
+   * Location where the video was recorded.
+   * Supported on iOS and Android (if the video contains location metadata)
+   */
+  location: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+  } | null;
 };
 
 export type VideoSource = string | File | Blob;

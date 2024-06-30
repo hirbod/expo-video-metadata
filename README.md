@@ -42,3 +42,14 @@ const result = await getVideoInfoAsync(sourceFilename: string | File | Blob, opt
 ```
 
 See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/main/src/ExpoVideoMetadata.types.ts#L1) type for more information.
+
+## Hints
+
+If you're using libraries like expo-image-picker, make sure to use [preferredAssetRepresentationMode](https://docs.expo.dev/versions/latest/sdk/imagepicker/#imagepickeroptions) option like this:
+
+```ts
+preferredAssetRepresentationMode: ImagePicker
+  .UIImagePickerPreferredAssetRepresentationMode.Current;
+```
+
+when picking a video. This will avoid the need to copy or transcode the video file and thus be a lot faster on iOS. If you use a different library, make sure to use the equivalent option. Location data is not supported with expo-image-picker, unless you set `legacy` to `true`.

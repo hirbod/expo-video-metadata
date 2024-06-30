@@ -11,23 +11,25 @@ export default function App() {
     <View style={styles.container}>
       <View
         style={{
-          flexDirection: "row",
+          flexDirection: "column",
           justifyContent: "center",
           alignItems: "center",
           flexWrap: "wrap",
-          gap: 20,
+          gap: 15,
         }}
       >
         <Pressable
-          style={{
-            backgroundColor: "black",
-            borderRadius: 20,
-            padding: 20,
-            borderCurve: "continuous",
-          }}
+          style={styles.btn}
           onPress={() => {
             ImagePicker.launchImageLibraryAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+              base64: false,
+              exif: true,
+              legacy: false,
+              videoQuality: ImagePicker.UIImagePickerControllerQualityType.High,
+              preferredAssetRepresentationMode:
+                ImagePicker.UIImagePickerPreferredAssetRepresentationMode
+                  .Current,
             }).then(async (result) => {
               if (result.canceled) {
                 return;
@@ -37,17 +39,10 @@ export default function App() {
             });
           }}
         >
-          <Text style={{ fontSize: 15, fontWeight: "bold", color: "white" }}>
-            Select Video with ImagePicker by Expo
-          </Text>
+          <Text style={styles.btnText}>Pick with expo-image-picker</Text>
         </Pressable>
         <Pressable
-          style={{
-            backgroundColor: "black",
-            borderRadius: 20,
-            padding: 20,
-            borderCurve: "continuous",
-          }}
+          style={styles.btn}
           onPress={async () => {
             const videoFile = await pickFile({
               mediaTypes: "video",
@@ -57,17 +52,10 @@ export default function App() {
             setResult(videoInfo);
           }}
         >
-          <Text style={{ fontSize: 15, fontWeight: "bold", color: "white" }}>
-            Select Video with custom picker
-          </Text>
+          <Text style={styles.btnText}>Custom Picker for web</Text>
         </Pressable>
         <Pressable
-          style={{
-            backgroundColor: "black",
-            borderRadius: 20,
-            padding: 20,
-            borderCurve: "continuous",
-          }}
+          style={styles.btn}
           onPress={async () => {
             const videoInfo = await getVideoInfoAsync(
               "https://download.samplelib.com/mp4/sample-5s.mp4"
@@ -75,9 +63,7 @@ export default function App() {
             setResult(videoInfo);
           }}
         >
-          <Text style={{ fontSize: 15, fontWeight: "bold", color: "white" }}>
-            Load remote video
-          </Text>
+          <Text style={styles.btnText}>Load remote video</Text>
         </Pressable>
       </View>
 
@@ -126,5 +112,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
+  },
+  btn: {
+    backgroundColor: "black",
+    borderRadius: 4,
+    padding: 15,
+    borderCurve: "continuous",
+    width: 200,
+  },
+  btnText: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: "white",
+    textAlign: "center",
   },
 });

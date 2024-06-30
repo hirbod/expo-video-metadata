@@ -94,6 +94,9 @@ export const pickFile = ({ mediaTypes = "all", option = {} }: Props) => {
                 : ImagePicker.MediaTypeOptions.All,
           allowsMultipleSelection: false,
           quality: 1,
+          preferredAssetRepresentationMode:
+            ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+          base64: false,
           ...option,
         });
         if (result.canceled) return;
