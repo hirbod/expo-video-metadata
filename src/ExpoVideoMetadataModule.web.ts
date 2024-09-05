@@ -53,27 +53,31 @@ export default {
     audioUrl: string,
     options: RequestInit = {}
   ): Promise<{ sampleRate: number; numberOfChannels: number }> {
-    const audioContext = new (window.AudioContext ||
-      (window as any).webkitAudioContext)();
-
     try {
       const response = await fetch(audioUrl, options);
       const arrayBuffer = await response.arrayBuffer();
 
-      return new Promise((resolve, reject) => {
-        audioContext.decodeAudioData(
-          arrayBuffer,
-          ({ sampleRate, numberOfChannels }) =>
-            resolve({ sampleRate, numberOfChannels }),
-          reject
-        );
-      });
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+
+      try {
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        return {
+          sampleRate: audioBuffer.sampleRate,
+          numberOfChannels: audioBuffer.numberOfChannels,
+        };
+      } catch (decodeError) {
+        console.info("Error decoding audio data (no audio?):", decodeError);
+        // If decoding fails, assume no audio
+        return { sampleRate: 0, numberOfChannels: 0 };
+      } finally {
+        await audioContext.close();
+      }
     } catch (error) {
-      throw new Error(
-        `Error fetching or decoding audio file: ${error.message}`
-      );
-    } finally {
-      await audioContext.close();
+      console.info("Error decoding audio data (CORS?):", error);
+
+      // If any error occurs during the process, return default values silently
+      return { sampleRate: 0, numberOfChannels: 0 };
     }
   },
 
@@ -92,7 +96,7 @@ export default {
       const contentLength = response.headers.get("Content-Length");
       return contentLength ? parseInt(contentLength, 10) : 0;
     } catch (error) {
-      console.error("Error fetching file size for URL:", url, error);
+      console.info("Error fetching file size for URL (CORS?):", url, error);
       return 0;
     }
   },
