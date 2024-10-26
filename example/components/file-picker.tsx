@@ -18,13 +18,13 @@ const getWebImageSize = (file: File) => {
 };
 
 type Props = {
-  mediaTypes?: "image" | "video" | "all";
+  mediaTypes?: ImagePicker.MediaType
   option?: ImagePicker.ImagePickerOptions;
 };
 
 export type FilePickerResolveValue = {
   file: File | string;
-  type?: "video" | "image";
+  type?: ImagePicker.ImagePickerAsset['type']
   size?: number;
 };
 const MAX_WIDTH_PIXEL = 10000;
@@ -32,7 +32,7 @@ const MAX_HEIGHT_PIXEL = 10000;
 
 const MAX_FILE_PIXEL = MAX_WIDTH_PIXEL * MAX_HEIGHT_PIXEL;
 
-export const pickFile = ({ mediaTypes = "all", option = {} }: Props) => {
+export const pickFile = ({ mediaTypes, option = {} }: Props) => {
   return new Promise<FilePickerResolveValue>(async (resolve, reject) => {
     if (Platform.OS === "web") {
       const input = document.createElement("input");
@@ -40,12 +40,12 @@ export const pickFile = ({ mediaTypes = "all", option = {} }: Props) => {
       input.hidden = true;
       input.multiple = false;
       const accepts: string[] = [];
-      if (mediaTypes === "all") {
+      if (!mediaTypes) {
         accepts.push("image/*");
         accepts.push("video/*");
-      } else if (mediaTypes === "image") {
+      } else if (mediaTypes === "images") {
         accepts.push("image/*");
-      } else if (mediaTypes === "video") {
+      } else if (mediaTypes === "videos") {
         accepts.push("video/*");
       }
 
@@ -87,11 +87,11 @@ export const pickFile = ({ mediaTypes = "all", option = {} }: Props) => {
       try {
         const result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes:
-            mediaTypes === "image"
-              ? ImagePicker.MediaTypeOptions.Images
-              : mediaTypes === "video"
-                ? ImagePicker.MediaTypeOptions.Videos
-                : ImagePicker.MediaTypeOptions.All,
+            mediaTypes === "images"
+              ? "images"
+              : mediaTypes === "videos"
+                ? "videos"
+                : undefined,
           allowsMultipleSelection: false,
           quality: 1,
           preferredAssetRepresentationMode:

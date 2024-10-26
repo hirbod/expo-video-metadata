@@ -1,12 +1,13 @@
 import * as ImagePicker from "expo-image-picker";
 import { VideoInfoResult, getVideoInfoAsync } from "expo-video-metadata";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { pickFile } from "./components/file-picker";
 
 export default function App() {
   const [result, setResult] = useState<VideoInfoResult | null>(null);
+  const [remoteVideoIsLoading, setRemoteVideoIsLoading] = useState(false);
   return (
     <View style={styles.container}>
       <View
@@ -22,7 +23,7 @@ export default function App() {
           style={styles.btn}
           onPress={() => {
             ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+              mediaTypes: "videos",
               base64: false,
               exif: true,
               legacy: false,
@@ -45,7 +46,7 @@ export default function App() {
           style={styles.btn}
           onPress={async () => {
             const videoFile = await pickFile({
-              mediaTypes: "video",
+              mediaTypes: "videos",
             });
             console.log(videoFile.file);
             const videoInfo = await getVideoInfoAsync(videoFile.file);
@@ -56,14 +57,26 @@ export default function App() {
         </Pressable>
         <Pressable
           style={styles.btn}
+          disabled={remoteVideoIsLoading}
           onPress={async () => {
-            const videoInfo = await getVideoInfoAsync(
-              "https://download.samplelib.com/mp4/sample-5s.mp4"
-            );
-            setResult(videoInfo);
+            try {
+              setRemoteVideoIsLoading(true);
+              const videoInfo = await getVideoInfoAsync(
+                "https://download.samplelib.com/mp4/sample-5s.mp4"
+              );
+              setResult(videoInfo);
+            }
+            finally {
+              setRemoteVideoIsLoading(false);
+            }
           }}
         >
           <Text style={styles.btnText}>Load remote video</Text>
+          {remoteVideoIsLoading && (
+            <View style={{ position: "absolute", right: 8, top: "50%", marginTop: 5, justifyContent: "center", alignItems:"center",  transform: [{ scale: 0.7}]}}>
+              <ActivityIndicator size={"small"} color="white" />
+              </View>
+          )}
         </Pressable>
       </View>
 
