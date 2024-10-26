@@ -1,6 +1,6 @@
 {
   "name": "expo-video-metadata",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Module to retrieve metadata from a video with Web, Expo and React Native",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -33,15 +33,14 @@
   "author": "Hirbod Mirjavadi (https://github.com/hirbod)",
   "license": "MIT",
   "homepage": "https://github.com/hirbod/expo-video-metadata#readme",
-  "dependencies": {},
   "devDependencies": {
-    "@types/react": "^18.2.45",
-    "expo-module-scripts": "^3.5.2",
-    "expo-modules-core": "^1.12.18"
+    "expo": "^52.0.0-preview.4",
+    "expo-module-scripts": "^3.5.2"
   },
   "peerDependencies": {
     "expo": "*",
     "react": "*",
     "react-native": "*"
-  }
+  },
+  "packageManager": "yarn@4.5.1"
 }
