@@ -32,6 +32,49 @@ interface HTMLVideoElementWithTracks extends HTMLVideoElement {
 export default {
   name: "ExpoVideoMetadata",
 
+  getVideoOrientation(video: HTMLVideoElementWithTracks) {
+    // Get the video element's transform style
+    const transform = window.getComputedStyle(video).transform;
+    const matrix = new DOMMatrix(transform);
+
+    // Calculate rotation angle from transform matrix
+    const rotation = Math.round(Math.atan2(matrix.b, matrix.a) * (180 / Math.PI));
+
+    // Get natural dimensions
+    const { videoWidth: width, videoHeight: height } = video;
+    const isNaturallyPortrait = height > width;
+
+    // First check if there's rotation applied via CSS transform
+    if (rotation !== 0) {
+      switch ((rotation + 360) % 360) {
+        case 90:
+          return "Portrait";
+        case 270:
+          return "PortraitUpsideDown";
+        case 0:
+          return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
+        case 180:
+          return isNaturallyPortrait ? "PortraitUpsideDown" : "LandscapeLeft";
+      }
+    }
+
+    // If no rotation, use natural dimensions
+    // Check for exact 16:9 ratio to handle the special case
+    const aspectRatio = width / height;
+    const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
+
+    if (is16_9) {
+      // For 16:9 videos, try to detect orientation from video track data
+      const videoTrack = video.videoTracks?.[0];
+      if (videoTrack?.label?.toLowerCase().includes('portrait')) {
+        return "Portrait";
+      }
+    }
+
+    // Default to dimensions-based orientation
+    return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
+  },
+
   getVideoFrameRate(videoElement: HTMLVideoElementWithTracks) {
     if (!videoElement.captureStream) {
       console.info("captureStream method not supported");
@@ -68,15 +111,12 @@ export default {
         };
       } catch (decodeError) {
         console.info("Error decoding audio data (no audio?):", decodeError);
-        // If decoding fails, assume no audio
         return { sampleRate: 0, numberOfChannels: 0 };
       } finally {
         await audioContext.close();
       }
     } catch (error) {
       console.info("Error decoding audio data (CORS?):", error);
-
-      // If any error occurs during the process, return default values silently
       return { sampleRate: 0, numberOfChannels: 0 };
     }
   },
@@ -136,8 +176,7 @@ export default {
       await new Promise<void>((resolve, reject) => {
         // Can't use `loadedmetadata` event because it does not contain videoTracks, audioTracks and other metadata
         video.onloadeddata = () => resolve();
-        video.onerror = () =>
-          reject(new Error("Failed to load video metadata"));
+        video.onerror = () => reject(new Error("Failed to load video metadata"));
         video.src = videoUrl;
         video.load();
         video.pause();
@@ -161,9 +200,14 @@ export default {
         fileSize && duration ? Math.floor(fileSize / duration) : 0;
 
       const { numberOfChannels: audioChannels, sampleRate: audioSampleRate } =
-        await this.getAudioBuffer(videoUrl);
+        await this.getAudioBuffer(videoUrl, options);
 
       const fps = this.getVideoFrameRate(video);
+      const orientation = this.getVideoOrientation(video);
+
+      // Calculate additional metadata
+      const aspectRatio = width / height;
+      const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
 
       return {
         duration,
@@ -178,7 +222,10 @@ export default {
         codec: videoTrack?.label ?? "",
         audioChannels,
         fps,
-        orientation: width >= height ? "Landscape" : "Portrait",
+        orientation,
+        aspectRatio,
+        is16_9,
+        naturalOrientation: width >= height ? "Landscape" : "Portrait",
         location: null, // not supported on web
       };
     } finally {

@@ -17,10 +17,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 import android.media.MediaExtractor
-import android.media.MediaFeature
 import android.media.MediaFormat
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlin.math.abs
 
 class ExpoVideoMetadataModule : Module() {
   private val context
@@ -79,6 +79,9 @@ class ExpoVideoMetadataModule : Module() {
           // Extract GPS location
           val location = extractGPSLocation(retriever)
 
+          // get orientation
+          val orientation = getOrientation(rotation, width, height)
+
           // release
           retriever.release()
 
@@ -115,7 +118,6 @@ class ExpoVideoMetadataModule : Module() {
 
           extractor.release()
 
-
           promise.resolve(
             mapOf(
               "audioChannels" to audioChannels,
@@ -127,7 +129,16 @@ class ExpoVideoMetadataModule : Module() {
               "hasAudio" to hasAudio,
               "isHDR" to isHDR,
               "audioCodec" to audioCodec,
-              "orientation" to getOrientation(rotation),
+              "orientation" to orientation,
+              "naturalOrientation" to if (width != null && height != null && width != 0 && height != 0) {
+                if (height > width) "Portrait" else "Landscape"
+              } else "Landscape",
+              "aspectRatio" to if (width != null && height != null && height != 0) {
+                width.toDouble() / height.toDouble()
+              } else null,
+              "is16_9" to if (width != null && height != null && height != 0) {
+                abs((width.toDouble() / height.toDouble()) - 16.0/9.0) < 0.01
+              } else false,
               "audioSampleRate" to audioSampleRate,
               "audioCodec" to audioCodec,
               "codec" to videoCodec,
@@ -141,7 +152,6 @@ class ExpoVideoMetadataModule : Module() {
         }
       }
     }
-
 
     OnDestroy {
       try {
@@ -196,45 +206,56 @@ class ExpoVideoMetadataModule : Module() {
     return permissionModuleInterface.getPathPermissions(context, url).contains(Permission.READ)
   }
 
-  private fun getOrientation(rotation: Int?): String {
-    return when (rotation) {
-      0 -> "LandscapeRight"
+  private fun getOrientation(rotation: Int?, width: Int?, height: Int?): String {
+    // If dimensions are null or zero, default to LandscapeRight
+    if (width == null || height == null || width == 0 || height == 0) {
+      return "LandscapeRight"
+    }
+
+    val isNaturallyPortrait = height > width
+
+    // If no rotation, use natural orientation
+    if (rotation == null) {
+      return if (isNaturallyPortrait) "Portrait" else "LandscapeRight"
+    }
+
+    // Normalize rotation to 0-360
+    val normalizedRotation = ((rotation % 360) + 360) % 360
+
+    return when (normalizedRotation) {
+      0 -> if (isNaturallyPortrait) "Portrait" else "LandscapeRight"
       90 -> "Portrait"
-      180 -> "LandscapeLeft"
+      180 -> if (isNaturallyPortrait) "PortraitUpsideDown" else "LandscapeLeft"
       270 -> "PortraitUpsideDown"
-      else -> "LandscapeRight" // Default or unknown rotation
+      else -> if (isNaturallyPortrait) "Portrait" else "LandscapeRight"
     }
   }
-
 
   private fun mapMimeTypeToCodecName(mimeType: String): String {
     return when {
       mimeType.startsWith("audio/") -> {
         when {
-          mimeType.contains("mp4a-latm") -> "aac" // AAC Audio
-          mimeType.contains("ac3") -> "ac3" // AC3 Audio
-          mimeType.contains("opus") -> "opus" // Opus Audio
-          mimeType.contains("vorbis") -> "vorbis" // Vorbis Audio
-          mimeType.contains("flac") -> "flac" // FLAC Audio
-          // Add more audio mappings as needed
+          mimeType.contains("mp4a-latm") -> "aac"
+          mimeType.contains("ac3") -> "ac3"
+          mimeType.contains("opus") -> "opus"
+          mimeType.contains("vorbis") -> "vorbis"
+          mimeType.contains("flac") -> "flac"
           else -> mimeType.substringAfter("audio/")
         }
       }
       mimeType.startsWith("video/") -> {
         when {
-          mimeType.contains("avc") || mimeType.contains("h264") -> "avc1" // H.264/AVC Video
-          mimeType.contains("hev") || mimeType.contains("h265") -> "hev1" // H.265/HEVC Video
-          mimeType.contains("vp9") -> "vp9" // VP9 Video
-          mimeType.contains("vp8") -> "vp8" // VP8 Video
-          mimeType.contains("mp4v-es") -> "mp4v" // MPEG-4 Video
-          // Add more video mappings as needed
+          mimeType.contains("avc") || mimeType.contains("h264") -> "avc1"
+          mimeType.contains("hev") || mimeType.contains("h265") -> "hev1"
+          mimeType.contains("vp9") -> "vp9"
+          mimeType.contains("vp8") -> "vp8"
+          mimeType.contains("mp4v-es") -> "mp4v"
           else -> mimeType.substringAfter("video/")
         }
       }
       else -> mimeType
     }
   }
-
 
   private inline fun withModuleScope(promise: Promise, crossinline block: () -> Unit) = moduleCoroutineScope.launch {
     try {

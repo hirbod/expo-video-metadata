@@ -43,6 +43,12 @@ export type VideoInfoResult = {
   /**
    * Video orientation.
    * Supported on all platforms, but on Web it may return an empty string.
+   * Orientation takes into account both the natural dimensions AND any rotation/transform applied to the video:
+   * - Portrait: The video is in portrait mode.
+   * - PortraitUpsideDown: The video is in portrait mode, but upside down.
+   * - Landscape: The video is in landscape mode.
+   * - LandscapeRight: The video is in landscape mode, but rotated 90 degrees clockwise.
+   * - LandscapeLeft: The video is in landscape mode, but rotated 90 degrees counter-clockwise.
    */
   orientation:
     | "Portrait"
@@ -50,6 +56,21 @@ export type VideoInfoResult = {
     | "Landscape"
     | "LandscapeRight"
     | "LandscapeLeft";
+  /**
+   * Natural orientation of the video.
+   * This is the orientation of the video as it was recorded, without any rotation/transform applied.
+   */
+  naturalOrientation:
+    | "Portrait"
+    | "Landscape";
+  /**
+   * Aspect ratio of the video.
+   */
+  aspectRatio: number;
+  /**
+   * Tells if the video is 16:9.
+   */
+  is16_9: boolean;
   /**
    * Audio sample rate of the video in samples per second.
    */
