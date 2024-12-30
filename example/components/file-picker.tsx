@@ -40,6 +40,7 @@ export const pickFile = ({ mediaTypes, option = {} }: Props) => {
       input.hidden = true;
       input.multiple = false;
       const accepts: string[] = [];
+      /*
       if (!mediaTypes) {
         accepts.push("image/*");
         accepts.push("video/*");
@@ -48,8 +49,12 @@ export const pickFile = ({ mediaTypes, option = {} }: Props) => {
       } else if (mediaTypes === "videos") {
         accepts.push("video/*");
       }
+        */
+
+      accepts.push("*/*");
 
       input.accept = accepts.join(",");
+
 
       input.onchange = async (e) => {
         const files = (e.target as HTMLInputElement)?.files;

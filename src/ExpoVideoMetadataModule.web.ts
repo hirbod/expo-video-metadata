@@ -1,33 +1,19 @@
+// ExpoVideoMetadata.ts
+import { VideoContainerParser } from './web/video-container-parser';
 import type {
   VideoInfoOptions,
   VideoInfoResult,
   VideoSource,
+  HTMLVideoElementWithTracks,
+  Track,
+  AudioTrack,
+  VideoTrack,
+  TrackList,
+  ParsedVideoMetadata,
+  VideoTrackMetadata
 } from "./ExpoVideoMetadata.types";
+import { HdrDetector } from './web/hdr-detector';
 
-interface Track {
-  id: string;
-  kind: string;
-  label: string;
-  language: string;
-}
-
-interface AudioTrack extends Track {
-  enabled: boolean;
-}
-
-interface VideoTrack extends Track {
-  selected: boolean;
-}
-
-type TrackList<T> = T[];
-
-interface HTMLVideoElementWithTracks extends HTMLVideoElement {
-  videoTracks?: TrackList<VideoTrack>;
-  audioTracks?: TrackList<AudioTrack>;
-  mozHasAudio?: boolean;
-  webkitAudioDecodedByteCount?: number;
-  captureStream?(): MediaStream;
-}
 
 export default {
   name: "ExpoVideoMetadata",
@@ -59,37 +45,38 @@ export default {
     }
 
     // If no rotation, use natural dimensions
-    // Check for exact 16:9 ratio to handle the special case
-    const aspectRatio = width / height;
-    const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
-
-    if (is16_9) {
-      // For 16:9 videos, try to detect orientation from video track data
-      const videoTrack = video.videoTracks?.[0];
-      if (videoTrack?.label?.toLowerCase().includes('portrait')) {
-        return "Portrait";
-      }
-    }
-
-    // Default to dimensions-based orientation
     return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
   },
 
-  getVideoFrameRate(videoElement: HTMLVideoElementWithTracks) {
-    if (!videoElement.captureStream) {
-      console.info("captureStream method not supported");
-      return 0;
+  getVideoFrameRate(videoElement: HTMLVideoElementWithTracks): number {
+    // Try captureStream() method first (works in Chrome/Firefox)
+    if (videoElement.captureStream) {
+      try {
+        const stream = videoElement.captureStream();
+        const [videoTrack] = stream.getVideoTracks();
+
+        if (videoTrack) {
+          const frameRate = videoTrack.getSettings().frameRate;
+          if (frameRate) {
+            console.log("frameRate", frameRate);
+            return frameRate;
+          }
+        }
+      } catch (error) {
+        console.info("Error using captureStream:", error);
+      }
     }
 
-    const stream = videoElement.captureStream();
-    const [videoTrack] = stream.getVideoTracks();
-
-    if (!videoTrack) {
-      console.info("No video track found");
-      return 0;
+    // Fallback for Safari using webkitDecodedFrameCount
+    if ('webkitDecodedFrameCount' in videoElement && videoElement.duration) {
+      const totalFrames = (videoElement as any).webkitDecodedFrameCount;
+      if (totalFrames > 0) {
+        return Math.round((totalFrames / videoElement.duration) * 100) / 100;
+      }
     }
 
-    return videoTrack.getSettings().frameRate ?? 0;
+    console.info("No supported method to detect frame rate");
+    return 0;
   },
 
   async getAudioBuffer(
@@ -145,15 +132,23 @@ export default {
     source: VideoSource,
     options: VideoInfoOptions = {}
   ): Promise<VideoInfoResult> {
-    const video = document.createElement("video") as HTMLVideoElementWithTracks;
-    let videoUrl = "";
+    let file: File | Blob;
+    let videoUrl: string;
 
     if (typeof source === "string") {
-      videoUrl = source;
-    } else if (source instanceof File || source instanceof Blob) {
+      try {
+        const response = await fetch(source, options);
+        file = await response.blob();
+        videoUrl = source;
+      } catch (error) {
+        throw new Error(`Failed to fetch video: ${error.message}`);
+      }
+    } else {
+      file = source;
       videoUrl = URL.createObjectURL(source);
     }
 
+    const video = document.createElement("video") as HTMLVideoElementWithTracks;
     Object.assign(video, {
       crossOrigin: "anonymous",
       autoplay: true,
@@ -166,15 +161,23 @@ export default {
       video.removeAttribute("src");
       video.load();
       video.remove();
-      // Revoke the object URL if it was created
       if (source instanceof File || source instanceof Blob) {
         URL.revokeObjectURL(videoUrl);
       }
     };
 
     try {
+      // Try container parsing first
+      let containerMetadata : ParsedVideoMetadata | null = null;
+      try {
+        containerMetadata = await VideoContainerParser.parseContainer(file);
+      } catch (error) {
+        console.info("Container parsing failed, falling back to browser API:", error);
+        containerMetadata = null;
+      }
+
+      // Load video element for additional metadata
       await new Promise<void>((resolve, reject) => {
-        // Can't use `loadedmetadata` event because it does not contain videoTracks, audioTracks and other metadata
         video.onloadeddata = () => resolve();
         video.onerror = () => reject(new Error("Failed to load video metadata"));
         video.src = videoUrl;
@@ -182,7 +185,6 @@ export default {
         video.pause();
       });
 
-      const { duration, videoWidth: width, videoHeight: height } = video;
       const videoTrack = video.videoTracks?.[0];
       const audioTrack = video.audioTracks?.[0];
 
@@ -191,42 +193,36 @@ export default {
         video.mozHasAudio ||
         Boolean(video.webkitAudioDecodedByteCount);
 
+      const { numberOfChannels: audioChannels, sampleRate: audioSampleRate } =
+        await this.getAudioBuffer(videoUrl, options);
+
       const fileSize =
         source instanceof File || source instanceof Blob
           ? source.size
           : await this.getFileSize(videoUrl, options);
 
-      const bitRate =
-        fileSize && duration ? Math.floor(fileSize / duration) : 0;
+      console.log("containerMetadata", containerMetadata);
 
-      const { numberOfChannels: audioChannels, sampleRate: audioSampleRate } =
-        await this.getAudioBuffer(videoUrl, options);
-
-      const fps = this.getVideoFrameRate(video);
-      const orientation = this.getVideoOrientation(video);
-
-      // Calculate additional metadata
-      const aspectRatio = width / height;
-      const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
-
+      // Use container metadata if available, fallback to video element
       return {
-        duration,
-        width,
-        height,
-        bitRate,
+        duration: video.duration,
+        width: containerMetadata?.width || video.videoWidth,
+        height: containerMetadata?.height || video.videoHeight,
+        bitRate: containerMetadata?.bitrate ||
+          (fileSize && video.duration ? Math.floor(fileSize / video.duration) : 0),
         fileSize,
         hasAudio,
         audioSampleRate,
-        isHDR: null, // not supported on web
+        isHDR: containerMetadata?.colorInfo ? HdrDetector.isHdr(containerMetadata.colorInfo) : null,
         audioCodec: audioTrack?.label ?? "",
-        codec: videoTrack?.label ?? "",
+        codec: containerMetadata?.codec || videoTrack?.label || "",
         audioChannels,
-        fps,
-        orientation,
-        aspectRatio,
-        is16_9,
-        naturalOrientation: width >= height ? "Landscape" : "Portrait",
-        location: null, // not supported on web
+        fps: containerMetadata?.fps || this.getVideoFrameRate(video) || 0,
+        orientation: this.getVideoOrientation(video),
+        naturalOrientation: (video.videoWidth >= video.videoHeight ? "Landscape" : "Portrait"),
+        aspectRatio: video.videoWidth / video.videoHeight,
+        is16_9: Math.abs((video.videoWidth / video.videoHeight) - 16/9) < 0.01,
+        location: null // not supported on web
       };
     } finally {
       resetVideo();
