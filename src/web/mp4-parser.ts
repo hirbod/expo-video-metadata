@@ -121,6 +121,9 @@ protected async parseBoxes(data: Uint8Array): Promise<MP4Box[]> {
     else if (type === 'avc1') {
       headerSize = 86;
     }
+    else if (type === 'hev1' || type === 'hvc1') {
+      headerSize = 86;  // Same as AVC1
+    }
 
     if (size === 1) {
       if (data.length - offset < 16) break;
@@ -299,20 +302,26 @@ protected async parseVideoTrack(trak: MP4Box): Promise<VideoTrackMetadata> {
     rotation = 180;
   }
 
-  let colorInfo: VideoColorInfo = this.getDefaultColorInfo();
-  console.debug('Parsing color info');
-  if (videoTrack) {
+let colorInfo: VideoColorInfo = this.getDefaultColorInfo();
+console.debug('Parsing color info');
+if (videoTrack) {
     const videoBoxes = await this.parseBoxes(videoTrack.data!);
     console.debug('Video track boxes:', videoBoxes.map(b => ({ type: b.type, size: b.size })));
 
     const colr = this.findBox(videoBoxes, 'colr');
+    const hvcC = this.findBox(videoBoxes, 'hvcC');
+    const avcC = this.findBox(videoBoxes, 'avcC');
+
     if (colr) {
-      console.debug('Found colr box:', { size: colr.size, dataLength: colr.data?.length });
-      colorInfo = HdrDetector.parseMP4ColorInfo(colr.data!);
+        colorInfo = HdrDetector.parseMP4ColorInfo(colr.data!);
+    } else if (hvcC) {
+        colorInfo = HdrDetector.parseMP4ColorInfo(hvcC.data!);
+    } else if (avcC) {
+        colorInfo = HdrDetector.parseMP4ColorInfo(avcC.data!);
     } else {
-      console.debug('No colr box in video track');
+        console.debug('No colr, hvcC or avcC box in video track');
     }
-  }
+}
 
   let fps;
   const mdhd = this.findBox(mdiaBoxes, 'mdhd');

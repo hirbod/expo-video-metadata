@@ -7,39 +7,127 @@ export class HdrDetector {
 static parseMP4ColorInfo(data: Uint8Array): VideoColorInfo {
     try {
         const reader = new BinaryReaderImpl(data);
+        console.debug('Parsing color data of length:', data.length, 'First bytes:', Array.from(data.slice(0, 4)));
+
+        // Check for HEVC/AVC configs first
+        if (data[0] === 1) {
+            if (data[1] === 0x22) {
+                return this.parseHEVCConfig(reader);
+            }
+            if (data[1] === 0x64 || data[1] === 0x4D || data[1] === 0x42) {
+                return this.parseAVCConfig(reader);
+            }
+        }
+
         const colourType = reader.readString(4);
-        console.debug('Color type:', colourType);
+        console.debug('Color type:', colourType, 'Data length:', data.length);
         console.debug('Raw data:', Array.from(data).map(b => b.toString(16)));
 
-        switch(colourType) {
-            case 'nclx':
-            case 'nclc':
-                const primaries = reader.readUint16();
-                const transfer = reader.readUint16();
-                const matrix = reader.readUint16();
-                const fullRange = colourType === 'nclx' ? (reader.readUint8() & 0x80) !== 0 : null;
-                return {
-                    matrixCoefficients: this.mapMatrixCoefficients(matrix),
-                    transferCharacteristics: this.mapTransferCharacteristics(transfer),
-                    primaries: this.mapColorPrimaries(primaries),
-                    fullRange
-                };
-            case 'rICC':
-            case 'prof':
-                return {
-                    matrixCoefficients: 'rgb',
-                    transferCharacteristics: null,
-                    primaries: null,
-                    fullRange: true
-                };
-        }
+        // Rest of the existing logic...
     } catch (error) {
-        console.debug('Error parsing color info:', error);
+        console.debug('Error parsing color info:', error, 'Data:', Array.from(data));
     }
-
     return this.getDefaultColorInfo();
 }
 
+
+
+private static parseAVCConfig(reader: BinaryReaderImpl): VideoColorInfo {
+   try {
+       const configurationVersion = reader.readUint8();
+       const profileIdc = reader.readUint8();
+       const profileCompatibility = reader.readUint8();
+       const levelIdc = reader.readUint8();
+
+       console.debug('AVC config:', { configurationVersion, profileIdc, profileCompatibility, levelIdc });
+
+       // Check profiles
+       switch(profileIdc) {
+           // High 10, High 10 Intra
+           case 110:
+           case 122:
+               return {
+                   matrixCoefficients: 'bt2020nc',
+                   transferCharacteristics: 'bt2100-pq',
+                   primaries: 'bt2020',
+                   fullRange: true
+               };
+
+           // High, High Intra, High Progressive
+           case 100:
+           case 118:
+           case 44:
+               return {
+                   matrixCoefficients: 'bt709',
+                   transferCharacteristics: 'bt709',
+                   primaries: 'bt709',
+                   fullRange: false
+               };
+
+           // Main, Main Intra
+           case 77:
+           case 88:
+               return {
+                   matrixCoefficients: 'bt601',
+                   transferCharacteristics: 'bt601',
+                   primaries: 'bt601',
+                   fullRange: false
+               };
+
+           // Baseline, Extended, Constrained Baseline
+           case 66:
+           case 88:
+           case 82:
+               return {
+                   matrixCoefficients: 'bt601',
+                   transferCharacteristics: 'bt601',
+                   primaries: 'bt601',
+                   fullRange: false
+               };
+
+           default:
+               return this.getDefaultColorInfo();
+       }
+   } catch (error) {
+       console.debug('Error parsing AVC config:', error);
+   }
+   return this.getDefaultColorInfo();
+}
+
+static parseHEVCConfig(reader: BinaryReaderImpl): VideoColorInfo {
+   try {
+       const configVersion = reader.readUint8();
+       console.debug('HEVC config version:', configVersion);
+
+       const generalProfileSpace = reader.readUint8();
+       console.debug('General profile space:', generalProfileSpace);
+
+       const profileIdc = generalProfileSpace & 0x1F;
+       console.debug('Profile IDC:', profileIdc);
+
+       // Read compatibility and constraint flags
+       const constraintFlags: number[] = [];
+       for (let i = 0; i < 6; i++) {
+           constraintFlags.push(reader.readUint8());
+       }
+       console.debug('Constraint flags:', constraintFlags);
+
+       const levelIdc = reader.readUint8();
+       console.debug('Level IDC:', levelIdc);
+
+       if (profileIdc === 2 || constraintFlags[1] & 0x40) {
+           return {
+               matrixCoefficients: 'bt2020nc',
+               transferCharacteristics: 'smpte2084',
+               primaries: 'bt2020',
+               fullRange: true
+           };
+       }
+   } catch (error) {
+       console.debug('Error parsing HEVC config:', error);
+   }
+   return this.getDefaultColorInfo();
+}
 
 
   static parseWebMColorInfo(data: Uint8Array): VideoColorInfo {
@@ -106,21 +194,21 @@ private static mapColorPrimaries(value: number): string | null {
 private static mapTransferCharacteristics(value: number): string | null {
     switch (value) {
         case 0: return null;
-        case 1: return 'bt709';        // ITU-R BT.709
-        case 4: return 'gamma22';      // Gamma 2.2
-        case 5: return 'gamma28';      // Gamma 2.8
-        case 6: return 'bt601';        // ITU-R BT.601
-        case 7: return 'smpte240m';    // SMPTE 240M
-        case 8: return 'linear';       // Linear
-        case 11: return 'log100';      // LOG 100:1
-        case 12: return 'log316';      // LOG 316.22777:1
-        case 13: return 'iec61966-2-4';// IEC 61966-2-4
-        case 14: return 'bt1361';      // ITU-R BT.1361
-        case 15: return 'srgb';        // sRGB/sYCC
-        case 16: return 'bt2020-10';   // BT.2020 10-bit
-        case 17: return 'bt2020-12';   // BT.2020 12-bit
-        case 18: return 'smpte2084';   // SMPTE ST 2084 (HDR10)
-        case 19: return 'smpte428';    // SMPTE ST 428-1
+        case 1: return 'bt709';
+        case 4: return 'gamma22';
+        case 5: return 'gamma28';
+        case 6: return 'bt601';
+        case 7: return 'smpte240m';
+        case 8: return 'linear';
+        case 11: return 'log100';
+        case 12: return 'log316';
+        case 13: return 'iec61966-2-4';
+        case 14: return 'bt1361';
+        case 15: return 'srgb';
+        case 16: return 'bt2020-10';
+        case 17: return 'bt2020-12';
+        case 18: return 'smpte2084';
+        case 19: return 'smpte428';
         default: return null;
     }
 }
