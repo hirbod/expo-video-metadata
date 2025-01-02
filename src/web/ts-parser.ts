@@ -28,25 +28,157 @@ export class TSParser {
     this.reader = new BinaryReaderImpl(data);
   }
 
-  async parse(): Promise<ParsedVideoMetadata> {
-    // Verify TS sync byte
+public async parse(): Promise<ParsedVideoMetadata> {
     if (!this.verifyTSSync()) {
-      throw new Error('Not a valid Transport Stream');
+        throw new Error('Not a valid Transport Stream');
     }
 
     const programInfo = await this.parsePAT();
     if (!programInfo.pmtPid) {
-      throw new Error('No PMT PID found');
+        throw new Error('No PMT PID found');
     }
 
     const streamInfo = await this.parsePMT(programInfo.pmtPid);
-    const metadata = await this.parseVideoStream(streamInfo);
+    const videoMetadata = await this.parseVideoStream(streamInfo);
+    const audioInfo = await this.parseAudioStream(streamInfo);
+
+    // Calculate duration from PCR values
+    const duration = await this.calculateDuration();
+
+    // Calculate bitrate - TS usually has a constant bitrate
+    const bitrate = duration ?
+        Math.floor(this.reader.length * 8 / duration) :
+        undefined;
 
     return {
-      ...metadata,
-      container: 'ts'
+        ...videoMetadata,
+        ...audioInfo,
+        duration,
+        fileSize: this.reader.length,
+        bitrate,
+        container: 'ts'
     };
-  }
+}
+
+private async calculateDuration(): Promise<number> {
+    try {
+        // Find first and last PCR values
+        let firstPCR: number | null = null;
+        let lastPCR: number | null = null;
+        const pcrPids = new Set<number>();
+
+        // First pass to find PCR PIDs
+        for (let offset = 0; offset < Math.min(this.reader.length, 940); offset += TSParser.PACKET_SIZE) {
+            const adaptationField = this.getAdaptationField(offset);
+            if (adaptationField && (adaptationField.flags & 0x10)) { // Has PCR
+                pcrPids.add(this.getPid(offset));
+            }
+        }
+
+        // Find first PCR
+        for (let offset = 0; offset < this.reader.length; offset += TSParser.PACKET_SIZE) {
+            const pid = this.getPid(offset);
+            if (pcrPids.has(pid)) {
+                const pcr = this.getPCR(offset);
+                if (pcr !== null) {
+                    firstPCR = pcr;
+                    break;
+                }
+            }
+        }
+
+        // Find last PCR
+        for (let offset = this.reader.length - TSParser.PACKET_SIZE; offset >= 0; offset -= TSParser.PACKET_SIZE) {
+            const pid = this.getPid(offset);
+            if (pcrPids.has(pid)) {
+                const pcr = this.getPCR(offset);
+                if (pcr !== null) {
+                    lastPCR = pcr;
+                    break;
+                }
+            }
+        }
+
+        if (firstPCR !== null && lastPCR !== null) {
+            return (lastPCR - firstPCR) / 90000; // PCR is in 90kHz units
+        }
+    } catch (error) {
+        console.debug('Error calculating duration:', error);
+    }
+
+    // Fallback: estimate from file size and typical bitrate
+    return Math.floor(this.reader.length * 8 / 10000000); // Assume ~10Mbps
+}
+
+private getPid(offset: number): number {
+    return ((this.reader.data[offset + 1] & 0x1f) << 8) | this.reader.data[offset + 2];
+}
+
+private getAdaptationField(offset: number): { length: number; flags: number } | null {
+    const flags = this.reader.data[offset + 3];
+    if ((flags & 0x20) === 0) return null; // No adaptation field
+
+    const length = this.reader.data[offset + 4];
+    if (length === 0) return null;
+
+    return { length, flags: this.reader.data[offset + 5] };
+}
+
+private getPCR(offset: number): number | null {
+    const adaptField = this.getAdaptationField(offset);
+    if (!adaptField || !(adaptField.flags & 0x10)) return null;
+
+    const pcrOffset = offset + 6;
+    const pcr_base = (this.reader.data[pcrOffset] * 33554432) +
+                    (this.reader.data[pcrOffset + 1] * 131072) +
+                    (this.reader.data[pcrOffset + 2] * 512) +
+                    (this.reader.data[pcrOffset + 3] * 2) +
+                    ((this.reader.data[pcrOffset + 4] & 0x80) >>> 7);
+
+    return pcr_base;
+}
+private async parseAudioStream(streamInfo: any): Promise<{
+    hasAudio: boolean;
+    audioChannels: number;
+    audioSampleRate: number;
+    audioCodec: string;
+}> {
+    try {
+        // Parse PMT for audio PIDs
+        const audioStreams = streamInfo.filter((stream: any) =>
+            [0x0f, 0x11, 0x03, 0x04].includes(stream.streamType)  // MPEG Audio, AAC, AC3 types
+        );
+
+        if (audioStreams.length > 0) {
+            const audioStream = audioStreams[0]; // Use first audio stream
+            let codec = '';
+
+            switch (audioStream.streamType) {
+                case 0x0f: codec = 'aac'; break;     // AAC
+                case 0x11: codec = 'aac'; break;     // LATM AAC
+                case 0x03: codec = 'mp3'; break;     // MPEG-1 Audio
+                case 0x04: codec = 'mp3'; break;     // MPEG-2 Audio
+                default: codec = 'unknown';
+            }
+
+            return {
+                hasAudio: true,
+                audioChannels: 2,  // Default to stereo as TS doesn't easily expose this
+                audioSampleRate: 48000,  // Default to common value
+                audioCodec: codec
+            };
+        }
+    } catch (error) {
+        console.debug('Error parsing audio stream:', error);
+    }
+
+    return {
+        hasAudio: false,
+        audioChannels: 0,
+        audioSampleRate: 0,
+        audioCodec: ''
+    };
+}
 
   private verifyTSSync(): boolean {
     // Check first few packets for sync byte
