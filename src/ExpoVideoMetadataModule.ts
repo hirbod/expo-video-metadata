@@ -1,2 +1,2 @@
-import { requireNativeModule } from "expo";
-export default requireNativeModule("ExpoVideoMetadata");
+import { requireNativeModule } from 'expo'
+export default requireNativeModule('ExpoVideoMetadata')

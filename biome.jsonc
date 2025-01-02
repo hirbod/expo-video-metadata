@@ -1,13 +1,34 @@
 {
-  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "linter": {
-    "rules": {
-      "style": {
-        "noNonNullAssertion": "off"
-      },
-      "complexity": {
-        "noStaticOnlyClass": "off"
-      }
-    }
-  }
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"organizeImports": {
+		"enabled": false
+	},
+	"linter": {
+		"rules": {
+			"style": {
+				"noNonNullAssertion": "off"
+			},
+			"complexity": {
+				"noStaticOnlyClass": "off"
+			}
+		}
+	},
+	"formatter": {
+		"lineWidth": 100,
+		"indentStyle": "space",
+		"indentWidth": 2
+	},
+	"javascript": {
+		"formatter": {
+			"semicolons": "asNeeded",
+			"quoteStyle": "single",
+			"bracketSameLine": true,
+			"trailingCommas": "es5"
+		}
+	},
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	}
 }

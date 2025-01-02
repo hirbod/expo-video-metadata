@@ -1,11 +1,7 @@
-import {
-	VideoInfoOptions,
-	VideoInfoResult,
-	VideoSource,
-} from "./ExpoVideoMetadata.types";
-import ExpoVideoMetadataModule from "./ExpoVideoMetadataModule";
+import { VideoInfoOptions, VideoInfoResult, VideoSource } from './ExpoVideoMetadata.types'
+import ExpoVideoMetadataModule from './ExpoVideoMetadataModule'
 
-export { VideoInfoOptions, VideoInfoResult };
+export { VideoInfoOptions, VideoInfoResult }
 
 // Import the native module. On web, it will be resolved to ExpoVideoMetadata.web.ts
 // and on native platforms to ExpoVideoMetadata.ts
@@ -19,8 +15,8 @@ export { VideoInfoOptions, VideoInfoResult };
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
 export async function getVideoInfoAsync(
-	source: VideoSource,
-	options: VideoInfoOptions = {},
+  source: VideoSource,
+  options: VideoInfoOptions = {}
 ): Promise<VideoInfoResult> {
-	return await ExpoVideoMetadataModule.getVideoInfo(source, options);
+  return await ExpoVideoMetadataModule.getVideoInfo(source, options)
 }
