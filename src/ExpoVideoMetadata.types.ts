@@ -130,23 +130,53 @@ export interface TimingInfo {
 }
 
 export interface VideoTrackMetadata {
-  width: number;
-  height: number;
-  rotation: number;
-  displayAspectWidth: number;
-  displayAspectHeight: number;
-  codec?: string;
-  fps?: number;
-  colorInfo: VideoColorInfo;
-  timing?: TimingInfo;
+   width: number;
+   height: number;
+   rotation: number;
+   displayAspectWidth: number;
+   displayAspectHeight: number;
+   codec: string;
+   fps?: number;
+   colorInfo: VideoColorInfo;
+   timing?: TimingInfo;
+   videoBitrate?: number;
+   audioBitrate?: number;
 }
 
 export interface ParsedVideoMetadata extends VideoTrackMetadata {
-  container: VideoContainer;
-  duration?: number;
-  bitrate?: number;
-  isHdr?: boolean;
+   container: VideoContainer;
+   hasAudio: boolean;
+   audioChannels: number;
+   audioSampleRate: number;
+   audioCodec: string;
+   duration: number;
+   fileSize: number;
+   bitrate?: number;
 }
+
+// Add common codec strings
+export type AudioCodec =
+    | 'aac'
+    | 'mp3'
+    | 'opus'
+    | 'vorbis'
+    | 'ac3'
+    | 'eac3'
+    | 'alac'
+    | 'flac'
+    | 'pcm'
+    | '';
+
+export type VideoCodec =
+    | 'avc1'    // H.264
+    | 'hev1'    // HEVC/H.265
+    | 'hvc1'    // HEVC/H.265 alternate
+    | 'mp4v'    // MPEG-4 Visual
+    | 'vp08'    // VP8
+    | 'vp09'    // VP9
+    | 'av01'    // AV1
+    | '';
+
 
 export interface BoxHeader {
   type: string;
