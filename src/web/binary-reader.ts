@@ -89,30 +89,29 @@ export class BinaryReaderImpl {
         return this.offset + length <= this.length;
     }
 
-    readVint(): number {
-        if (this.offset >= this.length) {
-            throw new Error('Read beyond bounds');
-        }
+readVint(): number {
+    const firstByte = this.readUint8();
 
-        const first = this.readUint8();
-        let length = 1;
-
-        // Count leading zeros to determine length
-        for (let i = 7; i >= 0; i--) {
-            if ((first & (1 << i)) !== 0) {
-                length = 8 - i;
-                break;
-            }
-        }
-
-        let value = first & ((1 << (8 - length)) - 1);
-        for (let i = 1; i < length; i++) {
-            if (this.offset >= this.length) {
-                throw new Error('Read beyond bounds');
-            }
-            value = (value << 8) | this.readUint8();
-        }
-
-        return value;
+    // Special cases for known large IDs
+    if (firstByte === 0x1A) { // EBML Header
+        return (0x1A << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8();
     }
+    if (firstByte === 0x18) { // Segment
+        return (0x18 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8();
+    }
+
+    let numBytes = 1;
+    let mask = 0x80;
+    while (numBytes <= 8 && !(firstByte & mask)) {
+        mask >>= 1;
+        numBytes++;
+    }
+
+    let value = firstByte & (mask - 1);
+    for (let i = 1; i < numBytes; i++) {
+        value = (value << 8) | this.readUint8();
+    }
+    return value;
+}
+
 }
