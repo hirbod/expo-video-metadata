@@ -1,15 +1,15 @@
 import * as ImagePicker from "expo-image-picker";
 import { VideoInfoResult, getVideoInfoAsync } from "expo-video-metadata";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { pickFile } from "./components/file-picker";
 
 export default function App() {
-  const [result, setResult] = useState<VideoInfoResult | null>(null);
+  const [result, setResult] = useState<VideoInfoResult | VideoInfoResult[] | null>(null);
   const [remoteVideoIsLoading, setRemoteVideoIsLoading] = useState(false);
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <View
         style={{
           flexDirection: "column",
@@ -44,14 +44,35 @@ export default function App() {
         </Pressable>
         <Pressable
           style={styles.btn}
-          onPress={async () => {
-            const videoFile = await pickFile({
-              mediaTypes: "videos",
-            });
-            console.log(videoFile.file);
-            const videoInfo = await getVideoInfoAsync(videoFile.file);
-            setResult(videoInfo);
-          }}
+onPress={async () => {
+  try {
+    const videoFiles = await pickFile({
+      mediaTypes: "videos",
+    });
+
+    if (Array.isArray(videoFiles)) {
+      const videoInfos = await Promise.all(
+        videoFiles.map(async (videoFile) => {
+          return await getVideoInfoAsync(videoFile.file);
+        })
+      );
+
+      console.log("files", videoFiles);
+      console.log("videoInfos", videoInfos);
+
+      setResult(videoInfos);
+    } else {
+      const videoInfo = await getVideoInfoAsync(videoFiles.file);
+      console.log("file", videoFiles);
+      console.log("videoInfo", videoInfo);
+
+      setResult([videoInfo]); // Wrapping in an array to keep result consistent
+    }
+  } catch (error) {
+    console.error("Error selecting video files:", error);
+  }
+}}
+
         >
           <Text style={styles.btnText}>Custom Picker for web</Text>
         </Pressable>
@@ -115,13 +136,12 @@ export default function App() {
           </Text>
         </Pressable>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
