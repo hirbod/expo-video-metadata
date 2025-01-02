@@ -1,4 +1,4 @@
-import { VideoInfoOptions, VideoInfoResult, VideoSource } from './ExpoVideoMetadata.types'
+import { VideoInfoOptions, VideoInfoResult, type VideoSource } from './ExpoVideoMetadata.types'
 import ExpoVideoMetadataModule from './ExpoVideoMetadataModule'
 
 export { VideoInfoOptions, VideoInfoResult }
