@@ -22,11 +22,18 @@ type Props = {
   option?: ImagePicker.ImagePickerOptions;
 };
 
-export type FilePickerResolveValue = {
-  file: File | string;
-  type?: ImagePicker.ImagePickerAsset['type']
-  size?: number;
-};
+export type FilePickerResolveValue =
+  | {
+      file: File | string;
+      type?: ImagePicker.ImagePickerAsset['type'];
+      size?: number;
+    }
+  | Array<{
+      file: File | string;
+      type?: ImagePicker.ImagePickerAsset['type'];
+      size?: number;
+    }>;
+
 const MAX_WIDTH_PIXEL = 10000;
 const MAX_HEIGHT_PIXEL = 10000;
 
@@ -38,7 +45,7 @@ export const pickFile = ({ mediaTypes, option = {} }: Props) => {
       const input = document.createElement("input");
       input.type = "file";
       input.hidden = true;
-      input.multiple = false;
+      input.multiple = true;
       const accepts: string[] = [];
       /*
       if (!mediaTypes) {
@@ -56,28 +63,38 @@ export const pickFile = ({ mediaTypes, option = {} }: Props) => {
       input.accept = accepts.join(",");
 
 
-      input.onchange = async (e) => {
-        const files = (e.target as HTMLInputElement)?.files;
-        const file = files ? files[0] : ({} as File);
-        if (file) {
-          const fileType = file.type.split("/")[0] as "image" | "video";
-          if (fileType === "image") {
-            const img = await getWebImageSize(file);
-            if (img && img.width * img.height > MAX_FILE_PIXEL) {
-              Alert.alert(
-                "Your image exceeds the maximum allowed size of 100 megapixels. Please choose a smaller image and try again."
-              );
-              return;
-            }
-          }
+input.onchange = async (e) => {
+  const files = (e.target as HTMLInputElement)?.files;
 
-          resolve({ file, type: fileType, size: file.size });
-          input.remove();
-        } else {
-          reject(new Error("No file selected"));
-          input.remove();
+  if (files && files.length > 0) {
+    const results: Array<{ file: File; type: "image" | "video"; size: number }> = [];
+
+    for (const file of Array.from(files)) {
+      const fileType = file.type.split("/")[0] as "image" | "video";
+
+      if (fileType === "image") {
+        const img = await getWebImageSize(file);
+        if (img && img.width * img.height > MAX_FILE_PIXEL) {
+          Alert.alert(
+            "One or more images exceed the maximum allowed size of 100 megapixels. Please choose smaller images and try again."
+          );
+          return;
         }
-      };
+      }
+
+      results.push({ file, type: fileType, size: file.size });
+    }
+
+    resolve(results); // Resolving an array of results
+    input.remove();
+  } else {
+    reject(new Error("No file selected"));
+    input.remove();
+  }
+};
+
+
+
       document.body.appendChild(input);
       input.click();
     } else {
