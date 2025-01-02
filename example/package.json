@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@remotion/media-parser": "4.0.243",
     "babel-plugin-module-resolver": "^5.0.2",
     "expo": "^52.0.0-preview.5",
     "expo-image-picker": "~16.0.0",

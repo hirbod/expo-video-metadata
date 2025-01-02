@@ -34,6 +34,7 @@
   "license": "MIT",
   "homepage": "https://github.com/hirbod/expo-video-metadata#readme",
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "expo": "^52.0.23",
     "expo-module-scripts": "^3.5.2"
   },
