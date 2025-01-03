@@ -21,7 +21,8 @@
 	"linter": {
 		"rules": {
 			"style": {
-				"noNonNullAssertion": "off"
+				"noNonNullAssertion": "off",
+				"useTemplate": "off"
 			},
 			"complexity": {
 				"noStaticOnlyClass": "off"
