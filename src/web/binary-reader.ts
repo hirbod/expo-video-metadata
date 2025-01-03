@@ -91,29 +91,81 @@ export class BinaryReaderImpl {
   }
 
   readVint(): number {
-    const firstByte = this.readUint8()
-
-    // Special cases for known large IDs
-    if (firstByte === 0x1a) {
-      // EBML Header
-      return (0x1a << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
-    }
-    if (firstByte === 0x18) {
-      // Segment
-      return (0x18 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
+    if (!this.canRead(1)) {
+      throw new Error('Cannot read VINT')
     }
 
-    let numBytes = 1
-    let mask = 0x80
-    while (numBytes <= 8 && !(firstByte & mask)) {
-      mask >>= 1
-      numBytes++
+    const firstByte = this.data[this.offset]
+    console.log('VINT first byte:', firstByte.toString(16))
+
+    // Special handling for known 4-byte IDs
+    if (this.canRead(4)) {
+      if (firstByte === 0x1a) {
+        this.offset++
+        const id =
+          (0x1a << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
+        console.log('Found EBML ID:', id.toString(16))
+        return id
+      }
+
+      if (firstByte === 0x18) {
+        this.offset++
+        const id =
+          (0x18 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
+        console.log('Found Segment ID:', id.toString(16))
+        return id
+      }
+
+      if (firstByte === 0x16) {
+        this.offset++
+        const id =
+          (0x16 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
+        console.log('Found Tracks ID:', id.toString(16))
+        return id
+      }
     }
 
-    let value = firstByte & (mask - 1)
-    for (let i = 1; i < numBytes; i++) {
+    this.offset++
+
+    // Count leading zeros
+    let length = 1
+    for (let mask = 0x80; mask !== 0; mask >>= 1) {
+      if ((firstByte & mask) !== 0) break
+      length++
+    }
+
+    console.log('VINT length:', length)
+    let value = firstByte & (0xff >> length)
+
+    // Read remaining bytes
+    for (let i = 1; i < length; i++) {
+      if (!this.canRead(1)) break
       value = (value << 8) | this.readUint8()
     }
+
+    console.log('VINT final value:', value.toString(16))
     return value
+  }
+
+  readEbmlSize(): number {
+    const firstByte = this.readUint8()
+    let length = 1
+
+    for (let i = 7; i >= 0; i--) {
+      if ((firstByte & (1 << i)) !== 0) break
+      length++
+    }
+
+    let size = firstByte & ((1 << (8 - length)) - 1)
+    for (let i = 1; i < length; i++) {
+      size = (size << 8) | this.readUint8()
+    }
+
+    // Validate size
+    if (size > this.remaining()) {
+      return this.remaining()
+    }
+
+    return size
   }
 }

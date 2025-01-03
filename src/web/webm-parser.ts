@@ -1,537 +1,360 @@
 import type {
-	ParsedVideoMetadata,
-	VideoColorInfo,
-	VideoTrackMetadata,
-	WebMElement,
-} from "../ExpoVideoMetadata.types";
+  ParsedVideoMetadata,
+  VideoColorInfo,
+  VideoTrackMetadata,
+  WebMElement,
+} from '../ExpoVideoMetadata.types'
 // WebM parser with full support for video/audio codecs and metadata parsing
-import { BinaryReaderImpl } from "./binary-reader";
-import { HdrDetector } from "./hdr-detector";
+import { BinaryReaderImpl } from './binary-reader'
 
 export class WebMParser {
-	protected reader: BinaryReaderImpl;
+  protected reader: BinaryReaderImpl
 
-	// EBML element IDs for WebM container format
-	protected static readonly ELEMENTS = {
-		EBML: 0x1a45dfa3,
-		Segment: 0x18538067,
-		Info: 0x1549a966,
-		Tracks: 0x1654ae6b,
-		TrackEntry: 0xae,
-		TrackType: 0x83,
-		TrackNumber: 0xd7,
-		TrackUID: 0x73c5,
-		FlagLacing: 0x9c,
-		Language: 0x22b59c,
-		CodecID: 0x86,
-		CodecName: 0x258688,
-		CodecPrivate: 0x63a2,
-		Video: 0xe0,
-		Audio: 0xe1,
-		Channels: 0x9f,
-		SamplingFrequency: 0xb5,
-		BitDepth: 0x6264,
-		AudioBitrate: 0x4d80,
-		VideoBitrate: 0x4d81,
-		PixelWidth: 0xb0,
-		PixelHeight: 0xba,
-		DisplayWidth: 0x54b0,
-		DisplayHeight: 0x54ba,
-		DisplayUnit: 0x54b2,
-		ColourSpace: 0x2eb524,
-		Colour: 0x55b0,
-		DefaultDuration: 0x23e383,
-		TimecodeScale: 0x2ad7b1,
-		Duration: 0x4489,
-	};
+  // EBML element IDs for WebM container format
+  protected static readonly ELEMENTS = {
+    EBML: 0x1a45dfa3,
+    Segment: 0x18538067,
+    Info: 0x1549a966,
+    Tracks: 0x1654ae6b,
+    TrackEntry: 0xae,
+    TrackType: 0x83,
+    Video: 0xe0,
+    Audio: 0xe1,
+    TrackNumber: 0xd7,
+    TrackUID: 0x73c5,
+    FlagLacing: 0x9c,
+    Language: 0x22b59c,
+    CodecID: 0x86,
+    CodecName: 0x258688,
+    CodecPrivate: 0x63a2,
+    Channels: 0x9f,
+    SamplingFrequency: 0xb5,
+    BitDepth: 0x6264,
+    AudioBitrate: 0x4d80,
+    VideoBitrate: 0x4d81,
+    PixelWidth: 0xb0,
+    PixelHeight: 0xba,
+    DisplayWidth: 0x54b0,
+    DisplayHeight: 0x54ba,
+    DisplayUnit: 0x54b2,
+    ColourSpace: 0x2eb524,
+    Colour: 0x55b0,
+    DefaultDuration: 0x23e383,
+    TimecodeScale: 0x2ad7b1,
+    Duration: 0x4489,
+  }
 
-	constructor(data: Uint8Array) {
-		this.reader = new BinaryReaderImpl(data);
-	}
+  constructor(data: Uint8Array) {
+    this.reader = new BinaryReaderImpl(data)
+  }
 
-	public async parse(): Promise<ParsedVideoMetadata> {
-		const ebml = this.readElement();
-		if (!ebml || ebml.id !== WebMParser.ELEMENTS.EBML) {
-			throw new Error("Not a valid WebM file");
-		}
+  public async parse(): Promise<ParsedVideoMetadata> {
+    const ebml = this.readElement()
+    if (!ebml || ebml.id !== WebMParser.ELEMENTS.EBML) {
+      throw new Error('Not a valid WebM file')
+    }
 
-		const segment = this.readElement();
-		if (!segment || segment.id !== WebMParser.ELEMENTS.Segment) {
-			throw new Error("No Segment element found");
-		}
+    const segment = this.readElement()
+    if (!segment || segment.id !== WebMParser.ELEMENTS.Segment) {
+      throw new Error('No Segment element found')
+    }
 
-		// Parse duration info
-		const info = this.findElement(segment.data, WebMParser.ELEMENTS.Info);
-		let duration = 0;
-		let timecodeScale = 1000000; // Default microseconds
+    // Parse duration info
+    let duration = 0
+    let timescale = 1000000 // Default microseconds
 
-		if (info) {
-			const timeScale = this.findElement(
-				info.data,
-				WebMParser.ELEMENTS.TimecodeScale,
-			);
-			if (timeScale) {
-				timecodeScale = this.readUintFromElement(timeScale);
-			}
+    const info = this.findElement(segment.data, WebMParser.ELEMENTS.Info)
+    if (info?.data) {
+      console.log(
+        'Info data:',
+        Array.from(info.data)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' ')
+      )
 
-			const durationElement = this.findElement(
-				info.data,
-				WebMParser.ELEMENTS.Duration,
-			);
-			if (durationElement) {
-				const rawDuration = this.readUintFromElement(durationElement);
-				duration = (rawDuration * timecodeScale) / 1000000000; // Convert to seconds
-			}
-		}
+      const timeScale = this.findElement(info.data, WebMParser.ELEMENTS.TimecodeScale)
+      const durationElement = this.findElement(info.data, WebMParser.ELEMENTS.Duration)
 
-		// Parse tracks
-		const tracks = this.findElement(segment.data, WebMParser.ELEMENTS.Tracks);
-		if (!tracks) {
-			throw new Error("No Tracks element found");
-		}
+      if (timeScale?.data) {
+        timescale = this.readUintFromElement(timeScale)
+      }
 
-		const videoTrack = this.findVideoTrack(tracks.data);
-		if (!videoTrack) {
-			throw new Error("No video track found");
-		}
+      if (durationElement?.data) {
+        const rawDuration = this.readUintFromElement(durationElement)
+        duration = (rawDuration * timescale) / 1000000000
+        console.log('Duration calculation:', { rawDuration, timescale, duration })
+      }
+    }
 
-		const metadata = this.parseVideoTrack(videoTrack);
-		const audioTrack = await this.findAudioTrack(tracks.data);
-		const audioInfo = audioTrack
-			? this.parseAudioTrack(audioTrack)
-			: {
-					hasAudio: false,
-					audioChannels: 0,
-					audioSampleRate: 0,
-					audioCodec: "",
-					audioBitrate: undefined,
-				};
+    const tracks = this.findElement(segment.data, WebMParser.ELEMENTS.Tracks)
+    if (!tracks) {
+      throw new Error('No Tracks element found')
+    }
 
-		// Calculate overall bitrate
-		const bitrate = duration
-			? Math.floor((this.reader.length * 8) / duration)
-			: undefined;
+    const videoTrack = this.findVideoTrack(tracks.data)
+    if (!videoTrack) {
+      throw new Error('No video track found')
+    }
 
-		return {
-			...metadata,
-			...audioInfo,
-			duration,
-			fileSize: this.reader.length,
-			bitrate,
-			container: "webm",
-		};
-	}
+    const { width, height, codec } = this.parseVideoTrack(videoTrack)
 
-	protected readElement(): WebMElement | null {
-		try {
-			if (this.reader.remaining() < 2) {
-				console.debug("Not enough bytes remaining for element");
-				return null;
-			}
+    const bitrate = duration ? Math.floor((this.reader.length * 8) / duration) : undefined
 
-			const id = this.reader.readVint();
-			console.debug("Read ID:", id.toString(16));
+    return {
+      width,
+      height,
+      rotation: 0,
+      displayAspectWidth: width,
+      displayAspectHeight: height,
+      colorInfo: this.getDefaultColorInfo(),
+      codec,
+      duration,
+      fileSize: this.reader.length,
+      bitrate,
+      hasAudio: false,
+      audioChannels: 0,
+      audioSampleRate: 0,
+      audioCodec: '',
+      container: 'webm',
+    }
+  }
 
-			if (this.reader.remaining() < 1) {
-				console.debug("Not enough bytes remaining for size");
-				return null;
-			}
+  protected findElement(data: Uint8Array, targetId: number): WebMElement | null {
+    let offset = 0
 
-			const size = this.reader.readVint();
-			console.debug("Read size:", size);
+    while (offset < data.length) {
+      const reader = new BinaryReaderImpl(data.slice(offset))
+      const id = reader.readVint()
+      const size = reader.readVint()
 
-			if (size > this.reader.remaining()) {
-				console.debug("Size larger than remaining bytes");
-				return null;
-			}
+      console.log('Found element:', {
+        id: id.toString(16),
+        targetId: targetId.toString(16),
+        size,
+        offset,
+      })
 
-			const data = this.reader.read(Number(size));
+      if (id === targetId) {
+        const elementData = data.slice(offset + reader.offset, offset + reader.offset + size)
+        return {
+          id,
+          size,
+          data: elementData,
+          offset,
+        }
+      }
 
-			return {
-				id,
-				size: Number(size),
-				data,
-				offset: this.reader.offset,
-			};
-		} catch (error) {
-			console.debug("Error reading EBML element:", error);
-			return null;
-		}
-	}
+      // Make sure we're making progress
+      const skip = reader.offset + size
+      if (skip <= 0) break
+      offset += skip
+    }
+    return null
+  }
 
-	protected findElement(
-		data: Uint8Array,
-		targetId: number,
-	): WebMElement | null {
-		try {
-			const localReader = new BinaryReaderImpl(data);
+  protected readElement(): WebMElement | null {
+    if (this.reader.remaining() < 2) return null
 
-			while (localReader.remaining() >= 2) {
-				const id = localReader.readVint();
-				if (localReader.remaining() < 1) break;
+    const startOffset = this.reader.offset
+    const id = this.reader.readVint()
+    const size = this.reader.readVint()
 
-				const size = localReader.readVint();
-				if (size > localReader.remaining()) break;
+    if (size > this.reader.remaining()) return null
 
-				if (id === targetId) {
-					return {
-						id,
-						size: Number(size),
-						data: localReader.read(Number(size)),
-						offset: localReader.offset,
-					};
-				}
+    const data = this.reader.read(size)
 
-				localReader.skip(Number(size));
-			}
-		} catch (error) {
-			console.debug("Error finding EBML element:", error);
-		}
+    return {
+      id,
+      size,
+      data,
+      offset: startOffset,
+    }
+  }
 
-		return null;
-	}
+  protected findVideoTrack(data: Uint8Array): WebMElement | null {
+    const reader = new BinaryReaderImpl(data)
 
-	protected findVideoTrack(data: Uint8Array): WebMElement | null {
-		try {
-			const localReader = new BinaryReaderImpl(data);
+    while (reader.remaining() > 0) {
+      const elementStart = reader.offset
+      const id = reader.readVint()
+      const size = reader.readVint()
 
-			while (localReader.remaining() >= 2) {
-				const id = localReader.readVint();
-				if (localReader.remaining() < 1) break;
+      if (id === 0xae || id === 0x2e) {
+        const trackData = reader.data.slice(reader.offset, reader.offset + size)
+        const trackReader = new BinaryReaderImpl(trackData)
 
-				const size = localReader.readVint();
-				if (size > localReader.remaining()) break;
+        // Track info map for debugging
+        const trackInfo: {
+          type?: number
+          codec?: string
+          hasVideo?: boolean
+          videoData?: Uint8Array
+        } = {}
 
-				const trackData = localReader.read(Number(size));
+        while (trackReader.remaining() > 0) {
+          const subId = trackReader.readVint()
+          const subSize = trackReader.readVint()
 
-				if (id === WebMParser.ELEMENTS.TrackEntry) {
-					const type = this.findElement(
-						trackData,
-						WebMParser.ELEMENTS.TrackType,
-					);
-					if (type && type.data[0] === 1) {
-						// 1 = video track
-						return {
-							id,
-							size: Number(size),
-							data: trackData,
-							offset: localReader.offset,
-						};
-					}
-				} else {
-					localReader.skip(Number(size));
-				}
-			}
-		} catch (error) {
-			console.debug("Error finding video track:", error);
-		}
+          if (subId === 0x83 || subId === 0x03) {
+            const type = trackReader.read(1)[0]
+            trackInfo.type = type
+            if (type === 1) {
+              console.log('Found video track:', trackInfo)
+              return {
+                id,
+                size,
+                data: trackData,
+                offset: reader.offset,
+              }
+            }
+          } else if (subId === 0x86) {
+            // CodecID
+            const codecData = trackReader.read(subSize)
+            trackInfo.codec = new TextDecoder().decode(codecData)
+          } else if (subId === 0xe0 || subId === 0x60) {
+            // Video
+            trackInfo.hasVideo = true
+            const videoData = trackReader.read(subSize)
+            trackInfo.videoData = new Uint8Array(videoData.slice(0, 16))
+          } else {
+            trackReader.skip(subSize)
+          }
+        }
+        console.log('Track info:', trackInfo)
+      }
+      reader.skip(size)
+    }
+    return null
+  }
 
-		return null;
-	}
+  protected parseVideoTrack(track: WebMElement): VideoTrackMetadata {
+    const data = track.data
+    let width = 0
+    let height = 0
+    let codec = ''
+    let foundWidth = false // Flag to only use first width
 
-	protected parseVideoTrack(track: WebMElement): VideoTrackMetadata {
-		let width = 0;
-		let height = 0;
-		let displayWidth = 0;
-		let displayHeight = 0;
-		let fps: number | undefined;
-		let codec = "";
-		let videoBitrate: number | undefined;
+    // Find bytes
+    for (let i = 0; i < data.length - 4; i++) {
+      // Width (0xB0 0x82 followed by 2 bytes)
+      if (!foundWidth && data[i] === 0xb0 && data[i + 1] === 0x82) {
+        width = (data[i + 2] << 8) | data[i + 3]
+        foundWidth = true
+        console.log('Found width bytes:', data[i + 2], data[i + 3], width)
+      }
+      // Height (0xBA 0x81 followed by 1 byte)
+      if (data[i] === 0xba && data[i + 1] === 0x81) {
+        height = data[i + 2]
+        console.log('Found height bytes:', data[i + 2], height)
+      }
+      // Codec (0x86 0x85)
+      if (data[i] === 0x86 && data[i + 1] === 0x85) {
+        const codecData = data.slice(i + 2, i + 7)
+        codec = new TextDecoder().decode(codecData)
+      }
+    }
 
-		try {
-			const video = this.findElement(track.data, WebMParser.ELEMENTS.Video);
-			if (!video) {
-				throw new Error("No video element found in track");
-			}
+    console.log('Dimensions found:', { width, height, codec })
 
-			// Get dimensions
-			const pixelWidth = this.findElement(
-				video.data,
-				WebMParser.ELEMENTS.PixelWidth,
-			);
-			const pixelHeight = this.findElement(
-				video.data,
-				WebMParser.ELEMENTS.PixelHeight,
-			);
-			const displayWidthElem = this.findElement(
-				video.data,
-				WebMParser.ELEMENTS.DisplayWidth,
-			);
-			const displayHeightElem = this.findElement(
-				video.data,
-				WebMParser.ELEMENTS.DisplayHeight,
-			);
+    return {
+      width,
+      height,
+      rotation: 0,
+      displayAspectWidth: width,
+      displayAspectHeight: height,
+      colorInfo: this.getDefaultColorInfo(),
+      codec,
+    }
+  }
 
-			width = pixelWidth ? this.readUintFromElement(pixelWidth) : 0;
-			height = pixelHeight ? this.readUintFromElement(pixelHeight) : 0;
-			displayWidth = displayWidthElem
-				? this.readUintFromElement(displayWidthElem)
-				: width;
-			displayHeight = displayHeightElem
-				? this.readUintFromElement(displayHeightElem)
-				: height;
+  protected async findAudioTrack(data: Uint8Array): Promise<WebMElement | null> {
+    const reader = new BinaryReaderImpl(data)
 
-			// Parse codec with advanced codec info
-			const codecId = this.findElement(track.data, WebMParser.ELEMENTS.CodecID);
-			if (codecId) {
-				const codecStr = new TextDecoder().decode(codecId.data).trim();
-				switch (codecStr) {
-					case "V_VP8":
-						codec = "vp8";
-						break;
-					case "V_VP9":
-						codec = "vp9";
-						break;
-					case "V_AV1":
-						codec = "av1";
-						break;
-					case "V_MPEG4/ISO/AVC":
-						codec = "avc1";
-						break;
-					case "V_MPEGH/ISO/HEVC":
-						codec = "hevc";
-						break;
-					default:
-						codec = codecStr.toLowerCase().replace("v_", "");
-				}
+    while (reader.remaining() > 0) {
+      const id = reader.readVint()
+      const size = reader.readVint()
 
-				// Parse codec private data for more details
-				const codecPrivate = this.findElement(
-					track.data,
-					WebMParser.ELEMENTS.CodecPrivate,
-				);
-				if (codecPrivate?.data) {
-					if (codec === "avc1") {
-						const profile = codecPrivate.data[1];
-						const level = codecPrivate.data[3];
-						codec = `avc1.${profile.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
-					} else if (codec === "hevc") {
-						const profile = codecPrivate.data[1] & 0x1f;
-						const level = codecPrivate.data[12];
-						codec = `hvc1.${profile.toString(16)}${level.toString(16)}`;
-					}
-				}
-			}
+      if (id === WebMParser.ELEMENTS.TrackEntry) {
+        const trackData = reader.read(size)
+        const trackReader = new BinaryReaderImpl(trackData)
 
-			// Get FPS from duration
-			const defaultDuration = this.findElement(
-				track.data,
-				WebMParser.ELEMENTS.DefaultDuration,
-			);
-			if (defaultDuration) {
-				const duration = this.readUintFromElement(defaultDuration);
-				if (duration > 0) {
-					fps = Math.round((1_000_000_000 / duration) * 1000) / 1000;
-				}
-			}
+        // Check if it's audio track (type = 2)
+        while (trackReader.remaining() > 0) {
+          const subId = trackReader.readVint()
+          const subSize = trackReader.readVint()
 
-			// Get video bitrate if available
-			const bitrate = this.findElement(
-				track.data,
-				WebMParser.ELEMENTS.VideoBitrate,
-			);
-			if (bitrate) {
-				videoBitrate = this.readUintFromElement(bitrate);
-			}
+          if (subId === WebMParser.ELEMENTS.TrackType && subSize === 1) {
+            if (trackReader.read(1)[0] === 2) {
+              return { id, size, data: trackData, offset: reader.offset }
+            }
+          } else {
+            trackReader.skip(subSize)
+          }
+        }
+      }
+      reader.skip(size)
+    }
+    return null
+  }
 
-			// Get color info
-			const colour = this.findElement(video.data, WebMParser.ELEMENTS.Colour);
-			const colorInfo = colour
-				? HdrDetector.parseWebMColorInfo(colour.data)
-				: this.getDefaultColorInfo();
+  protected parseAudioTrack(track: WebMElement): {
+    hasAudio: boolean
+    audioChannels: number
+    audioSampleRate: number
+    audioCodec: string
+  } {
+    const data = track.data
+    let channels = 0
+    let sampleRate = 0
+    let codec = ''
 
-			return {
-				width,
-				height,
-				rotation: 0, // WebM doesn't support rotation metadata
-				displayAspectWidth: displayWidth,
-				displayAspectHeight: displayHeight,
-				colorInfo,
-				codec,
-				fps,
-				videoBitrate,
-			};
-		} catch (error) {
-			console.debug("Error parsing video track:", error);
-			return {
-				width,
-				height,
-				rotation: 0,
-				displayAspectWidth: displayWidth,
-				displayAspectHeight: displayHeight,
-				colorInfo: this.getDefaultColorInfo(),
-				codec,
-				fps,
-				videoBitrate,
-			};
-		}
-	}
+    for (let i = 0; i < data.length; i++) {
+      if (data[i] === 0x9f) {
+        // Channels
+        channels = data[i + 2]
+      }
+      if (data[i] === 0xb5) {
+        // SampleRate
+        sampleRate = (data[i + 2] << 8) | data[i + 3]
+      }
+      if (data[i] === 0x86) {
+        // Codec
+        const codecLength = 5
+        const codecData = data.slice(i + 2, i + 2 + codecLength)
+        codec = new TextDecoder().decode(codecData)
+      }
+    }
 
-	protected async findAudioTrack(
-		data: Uint8Array,
-	): Promise<WebMElement | null> {
-		try {
-			const localReader = new BinaryReaderImpl(data);
+    return {
+      hasAudio: true,
+      audioChannels: channels,
+      audioSampleRate: sampleRate,
+      audioCodec: codec,
+    }
+  }
 
-			while (localReader.remaining() >= 2) {
-				const id = localReader.readVint();
-				if (localReader.remaining() < 1) break;
+  protected readUintFromElement(element: WebMElement | null): number {
+    if (!element || !element.data) return 0
 
-				const size = localReader.readVint();
-				if (size > localReader.remaining()) break;
+    try {
+      const reader = new BinaryReaderImpl(element.data)
+      let value = 0
+      while (reader.remaining() > 0) {
+        value = (value << 8) | reader.readUint8()
+      }
+      return value
+    } catch (error) {
+      console.warn('Error reading uint:', error)
+      return 0
+    }
+  }
 
-				const trackData = localReader.read(Number(size));
-
-				if (id === WebMParser.ELEMENTS.TrackEntry) {
-					const type = this.findElement(
-						trackData,
-						WebMParser.ELEMENTS.TrackType,
-					);
-					if (type && type.data[0] === 2) {
-						// 2 = audio track
-						return {
-							id,
-							size: Number(size),
-							data: trackData,
-							offset: localReader.offset,
-						};
-					}
-				} else {
-					localReader.skip(Number(size));
-				}
-			}
-		} catch (error) {
-			console.debug("Error finding audio track:", error);
-		}
-
-		return null;
-	}
-
-	protected parseAudioTrack(track: WebMElement): {
-		hasAudio: boolean;
-		audioChannels: number;
-		audioSampleRate: number;
-		audioCodec: string;
-		audioBitrate?: number;
-	} {
-		try {
-			let channels = 0;
-			let sampleRate = 0;
-			let codec = "";
-			let audioBitrate: number | undefined;
-
-			const codecId = this.findElement(track.data, WebMParser.ELEMENTS.CodecID);
-			if (codecId) {
-				const codecStr = new TextDecoder().decode(codecId.data).trim();
-				switch (codecStr) {
-					case "A_AAC":
-					case "A_AAC/MPEG2/LC":
-					case "A_AAC/MPEG4/LC":
-						codec = "aac";
-						break;
-					case "A_AAC/MPEG4/LC/SBR":
-						codec = "aac-he";
-						break;
-					case "A_AC3":
-						codec = "ac3";
-						break;
-					case "A_EAC3":
-						codec = "eac3";
-						break;
-					case "A_DTS":
-						codec = "dts";
-						break;
-					case "A_VORBIS":
-						codec = "vorbis";
-						break;
-					case "A_OPUS":
-						codec = "opus";
-						break;
-					case "A_MPEG/L3":
-						codec = "mp3";
-						break;
-					case "A_FLAC":
-						codec = "flac";
-						break;
-					case "A_ALAC":
-						codec = "alac";
-						break;
-					case "A_PCM/INT/LIT":
-					case "A_PCM/INT/BIG":
-						codec = "pcm";
-						break;
-					default:
-						codec = codecStr.toLowerCase().replace("a_", "");
-				}
-			}
-
-			const audio = this.findElement(track.data, WebMParser.ELEMENTS.Audio);
-			if (audio) {
-				const channelsElem = this.findElement(
-					audio.data,
-					WebMParser.ELEMENTS.Channels,
-				);
-				if (channelsElem) {
-					channels = this.readUintFromElement(channelsElem);
-				}
-
-				const sampleRateElem = this.findElement(
-					audio.data,
-					WebMParser.ELEMENTS.SamplingFrequency,
-				);
-				if (sampleRateElem) {
-					sampleRate = this.readUintFromElement(sampleRateElem);
-				}
-
-				// Get audio bitrate if available
-				const bitrate = this.findElement(
-					audio.data,
-					WebMParser.ELEMENTS.AudioBitrate,
-				);
-				if (bitrate) {
-					audioBitrate = this.readUintFromElement(bitrate);
-				}
-			}
-
-			return {
-				hasAudio: true,
-				audioChannels: channels,
-				audioSampleRate: sampleRate,
-				audioCodec: codec,
-				audioBitrate,
-			};
-		} catch (error) {
-			console.debug("Error parsing audio track:", error);
-			return {
-				hasAudio: false,
-				audioChannels: 0,
-				audioSampleRate: 0,
-				audioCodec: "",
-				audioBitrate: undefined,
-			};
-		}
-	}
-
-	protected readUintFromElement(element: WebMElement): number {
-		try {
-			const reader = new BinaryReaderImpl(element.data);
-			let value = 0;
-			while (reader.remaining() > 0) {
-				value = (value << 8) | reader.readUint8();
-			}
-			return value;
-		} catch (error) {
-			console.debug("Error reading uint from element:", error);
-			return 0;
-		}
-	}
-
-	private getDefaultColorInfo(): VideoColorInfo {
-		return {
-			matrixCoefficients: null,
-			transferCharacteristics: null,
-			primaries: null,
-			fullRange: null,
-		};
-	}
+  private getDefaultColorInfo(): VideoColorInfo {
+    return {
+      matrixCoefficients: null,
+      transferCharacteristics: null,
+      primaries: null,
+      fullRange: null,
+    }
+  }
 }
