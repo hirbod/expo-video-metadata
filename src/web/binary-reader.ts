@@ -96,7 +96,7 @@ export class BinaryReaderImpl {
     }
 
     const firstByte = this.data[this.offset]
-    console.log('VINT first byte:', firstByte.toString(16))
+    //console.log('VINT first byte:', firstByte.toString(16))
 
     // Special handling for known 4-byte IDs
     if (this.canRead(4)) {
@@ -112,7 +112,7 @@ export class BinaryReaderImpl {
         this.offset++
         const id =
           (0x18 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
-        console.log('Found Segment ID:', id.toString(16))
+        //console.log('Found Segment ID:', id.toString(16))
         return id
       }
 
@@ -120,7 +120,7 @@ export class BinaryReaderImpl {
         this.offset++
         const id =
           (0x16 << 24) | (this.readUint8() << 16) | (this.readUint8() << 8) | this.readUint8()
-        console.log('Found Tracks ID:', id.toString(16))
+        //console.log('Found Tracks ID:', id.toString(16))
         return id
       }
     }
@@ -134,7 +134,7 @@ export class BinaryReaderImpl {
       length++
     }
 
-    console.log('VINT length:', length)
+    //console.log('VINT length:', length)
     let value = firstByte & (0xff >> length)
 
     // Read remaining bytes
@@ -143,7 +143,7 @@ export class BinaryReaderImpl {
       value = (value << 8) | this.readUint8()
     }
 
-    console.log('VINT final value:', value.toString(16))
+    //console.log('VINT final value:', value.toString(16))
     return value
   }
 
