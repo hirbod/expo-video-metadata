@@ -320,6 +320,7 @@ export class WebMParser {
         const headerSize = reader.offset
 
         // Debug what we found
+        /*
         console.debug('Found element:', {
           offset,
           id: '0x' + id.toString(16),
@@ -330,6 +331,7 @@ export class WebMParser {
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' '),
         })
+            */
 
         // Special handling for single-byte elements
         if (data[offset] === targetId && targetId < 0xff) {
@@ -524,8 +526,56 @@ export class WebMParser {
     // Find codec
     const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
 
-    // Find default duration for FPS calculation
+    // Try to find default duration first in Video element
     const durationElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.DefaultDuration)
+    let fps = 0
+
+    // If not found in Video element, try scanning the entire track data
+    if (!durationElement?.data) {
+      console.debug('DefaultDuration not found in Video element, trying direct scan')
+
+      // Scan for DefaultDuration element bytes (0x23E383)
+      for (let i = 0; i < data.length - 6; i++) {
+        if (data[i] === 0x23 && data[i + 1] === 0xe3 && data[i + 2] === 0x83) {
+          const durationData = data.slice(i + 3, i + 7)
+
+          // EBML variable integer format:
+          // First byte (0x84) indicates 4-byte integer
+          // Next 3 bytes contain the actual value
+          const defaultDuration =
+            ((durationData[1] << 24) | (durationData[2] << 16) | (durationData[3] << 8)) >>> 0
+
+          // Convert nanoseconds per frame to frames per second
+          const nanosPerSecond = 1_000_000_000
+          fps = Math.round(nanosPerSecond / defaultDuration)
+
+          console.debug('DefaultDuration found by scanning:', {
+            rawBytes: Array.from(durationData)
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' '),
+            defaultDuration,
+            nanosPerFrame: defaultDuration,
+            calculatedFps: fps,
+            calculation: {
+              formula: `${nanosPerSecond} / ${defaultDuration}`,
+              steps: [
+                `Raw bytes: ${Array.from(durationData)
+                  .map((b) => b.toString(16).padStart(2, '0'))
+                  .join(' ')}`,
+                `Value bytes: ${Array.from(durationData.slice(1))
+                  .map((b) => b.toString(16).padStart(2, '0'))
+                  .join(' ')}`,
+                `Duration = ${defaultDuration} ns/frame`,
+                `FPS = ${nanosPerSecond} / ${defaultDuration} = ${nanosPerSecond / defaultDuration} ≈ ${fps}`,
+              ],
+            },
+          })
+          break
+        }
+      }
+    } else {
+      fps = Math.round(1_000_000_000 / this.readUintFromElement(durationElement))
+    }
 
     // Parse values
     const width = widthElement?.data ? this.readUintFromElement(widthElement) : 0
@@ -533,9 +583,6 @@ export class WebMParser {
     const codec = codecElement?.data
       ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
       : ''
-    const fps = durationElement?.data
-      ? Math.round(1_000_000_000 / this.readUintFromElement(durationElement))
-      : 0
 
     return { width, height, codec, fps }
   }
