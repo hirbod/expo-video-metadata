@@ -310,8 +310,11 @@ export class WebMParser {
    */
   protected findElement(data: Uint8Array, targetId: number): WebMElement | null {
     let offset = 0
+    let attempts = 0
+    const maxAttempts = 100 // Safety limit
 
-    while (offset < data.length - 1) {
+    while (offset < data.length - 1 && attempts < maxAttempts) {
+      attempts++
       try {
         // Try normal VINT parsing first
         const reader = new BinaryReaderImpl(data.slice(offset))
@@ -319,81 +322,45 @@ export class WebMParser {
         const size = reader.readVint()
         const headerSize = reader.offset
 
-        // Debug what we found
-        /*
-        console.debug('Found element:', {
-          offset,
-          id: '0x' + id.toString(16),
-          targetId: '0x' + targetId.toString(16),
-          size,
-          headerSize,
-          raw: Array.from(data.slice(offset, offset + headerSize + size))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' '),
-        })
-            */
-
         // Special handling for single-byte elements
-        if (data[offset] === targetId && targetId < 0xff) {
-          // Next byte should be size marker
-          const sizeByte = data[offset + 1]
-          if ((sizeByte & 0x80) === 0x80) {
-            // Valid size marker
-            const size = sizeByte & 0x7f
-            const elementData = data.slice(offset + 2, offset + 2 + size)
+        if ((data[offset] === targetId && targetId < 0xff) || id === targetId) {
+          // For single-byte elements, next byte should be size marker
+          let elementSize = size
+          let elementOffset = offset + headerSize
+          let elementData: Uint8Array
 
-            console.debug('Found single-byte element:', {
-              id: '0x' + targetId.toString(16),
-              size,
-              raw: Array.from(data.slice(offset, offset + 2 + size))
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
-              data: Array.from(elementData)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
-            })
-
-            return {
-              id: targetId,
-              size,
-              data: elementData,
-              offset: offset + 2,
+          if (data[offset] === targetId && targetId < 0xff) {
+            const sizeByte = data[offset + 1]
+            if ((sizeByte & 0x80) === 0x80) {
+              elementSize = sizeByte & 0x7f
+              elementData = data.slice(offset + 2, offset + 2 + elementSize)
+              elementOffset = offset + 2
+            } else {
+              // Skip this match as it's not a valid EBML size marker
+              offset += 1
+              continue
             }
+          } else {
+            elementData = data.slice(elementOffset, elementOffset + elementSize)
           }
-        }
 
-        // Special handling for audio elements
-        const audioElements = {
-          159: true, // Channels
-          181: true, // SamplingFrequency
-        }
-
-        if (id === targetId && audioElements[targetId]) {
-          console.debug('Found audio element:', {
-            id: '0x' + id.toString(16),
-            size,
-            raw: Array.from(data.slice(offset, offset + headerSize + size))
+          console.debug('Found matching element:', {
+            id: '0x' + targetId.toString(16),
+            size: elementSize,
+            offset: elementOffset,
+            raw: Array.from(data.slice(offset, offset + Math.min(headerSize + elementSize, 16)))
               .map((b) => b.toString(16).padStart(2, '0'))
               .join(' '),
-            data: Array.from(data.slice(offset + headerSize, offset + headerSize + size))
+            data: Array.from(elementData)
               .map((b) => b.toString(16).padStart(2, '0'))
               .join(' '),
           })
 
           return {
-            id,
-            size,
-            data: data.slice(offset + headerSize, offset + headerSize + size),
-            offset: offset + headerSize,
-          }
-        }
-
-        if (id === targetId) {
-          return {
-            id,
-            size,
-            data: data.slice(offset + headerSize, offset + headerSize + size),
-            offset: offset + headerSize,
+            id: targetId,
+            size: elementSize,
+            data: elementData,
+            offset: elementOffset,
           }
         }
 
@@ -401,6 +368,13 @@ export class WebMParser {
       } catch (error) {
         offset += 1
       }
+    }
+
+    if (attempts >= maxAttempts) {
+      console.warn('Exceeded maximum attempts while searching for element:', {
+        targetId: '0x' + targetId.toString(16),
+        dataLength: data.length,
+      })
     }
 
     return null
@@ -511,27 +485,116 @@ export class WebMParser {
     fps: number
   } {
     const data = track.data
+    let width = 0
+    let height = 0
+    let fps = 0
 
     // Find video-specific elements
     const videoElement = this.findElement(data, WebMParser.ELEMENTS.Video)
-    if (!videoElement) {
-      console.warn('No Video element found in track')
-      return { width: 0, height: 0, codec: '', fps: 0 }
+
+    // Try to find dimensions in Video element first
+    if (videoElement?.data) {
+      const widthElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelWidth)
+      const heightElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelHeight)
+
+      // Try to find default duration in Video element
+      const durationElement = this.findElement(
+        videoElement.data,
+        WebMParser.ELEMENTS.DefaultDuration
+      )
+
+      if (widthElement?.data) {
+        width = this.readUintFromElement(widthElement)
+      }
+      if (heightElement?.data) {
+        height = this.readUintFromElement(heightElement)
+      }
+      if (durationElement?.data) {
+        fps = Math.round(1_000_000_000 / this.readUintFromElement(durationElement))
+      }
     }
 
-    // Find dimensions in Video element
-    const widthElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelWidth)
-    const heightElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelHeight)
+    // If dimensions not found in Video element, try track data directly
+    if (!width || !height) {
+      console.debug('Dimensions not found through EBML parsing, trying direct scan')
 
-    // Find codec
-    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
+      // Log the raw data we're scanning
+      console.debug('Track data to scan:', {
+        length: data.length,
+        sample: Array.from(data.slice(0, Math.min(64, data.length)))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' '),
+      })
 
-    // Try to find default duration first in Video element
-    const durationElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.DefaultDuration)
-    let fps = 0
+      // First scan forward for width
+      for (let i = 0; i < data.length - 3; i++) {
+        const currentByte = data[i]
+        const nextByte = data[i + 1]
 
-    // If not found in Video element, try scanning the entire track data
-    if (!durationElement?.data) {
+        // Process width
+        if (!width && currentByte === 0xb0 && (nextByte === 0x82 || nextByte === 0x81)) {
+          const size = nextByte === 0x82 ? 2 : 1
+          const widthData = data.slice(i + 2, i + 2 + size)
+          if (size === 2) {
+            width = (widthData[0] << 8) | widthData[1]
+          } else {
+            width = widthData[0]
+          }
+          console.debug('Found width by scanning:', {
+            offset: i,
+            size,
+            value: width,
+            bytes: Array.from(data.slice(i, i + 2 + size))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' '),
+          })
+        }
+      }
+
+      // Then scan backward for height since it's usually at the end
+      for (let i = data.length - 1; i >= 2; i--) {
+        const currentByte = data[i - 2]
+        const nextByte = data[i - 1]
+        const valueByte = data[i]
+
+        console.debug('Scanning backward:', {
+          offset: i - 2,
+          bytes: Array.from(data.slice(i - 2, i + 1))
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join(' '),
+        })
+
+        if (!height && currentByte === 0xba && (nextByte === 0x82 || nextByte === 0x81)) {
+          const size = nextByte === 0x82 ? 2 : 1
+          const heightData = data.slice(i, i + size)
+          if (size === 2) {
+            height = (heightData[0] << 8) | heightData[1]
+          } else {
+            height = heightData[0]
+          }
+          console.debug('Found height by backward scanning:', {
+            offset: i - 2,
+            size,
+            value: height,
+            bytes: Array.from(data.slice(i - 2, i + size))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' '),
+          })
+          break
+        }
+      }
+
+      console.debug('Dimension scan results:', {
+        width,
+        height,
+        lastBytes: Array.from(data.slice(Math.max(0, data.length - 8)))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' '),
+      })
+    }
+
+    // If FPS not found, try scanning the entire track data
+    if (!fps) {
       console.debug('DefaultDuration not found in Video element, trying direct scan')
 
       // Scan for DefaultDuration element bytes (0x23E383)
@@ -573,13 +636,10 @@ export class WebMParser {
           break
         }
       }
-    } else {
-      fps = Math.round(1_000_000_000 / this.readUintFromElement(durationElement))
     }
 
-    // Parse values
-    const width = widthElement?.data ? this.readUintFromElement(widthElement) : 0
-    const height = heightElement?.data ? this.readUintFromElement(heightElement) : 0
+    // Find codec
+    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     const codec = codecElement?.data
       ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
       : ''
@@ -595,6 +655,8 @@ export class WebMParser {
 
   protected async findAudioTrack(data: Uint8Array): Promise<WebMElement | null> {
     const reader = new BinaryReaderImpl(data)
+    let attempts = 0
+    const maxAttempts = 10000 // Safety limit
 
     console.debug('Audio track search:', {
       firstTrackBytes: Array.from(data.slice(0, 32))
@@ -602,7 +664,8 @@ export class WebMParser {
         .join(' '),
     })
 
-    while (reader.remaining() > 0) {
+    while (reader.remaining() > 0 && attempts < maxAttempts) {
+      attempts++
       try {
         const id = reader.readVint()
         const size = reader.readVint()
@@ -640,6 +703,10 @@ export class WebMParser {
       }
     }
 
+    if (attempts >= maxAttempts) {
+      console.warn('Exceeded maximum attempts while searching for audio track')
+    }
+
     return null
   }
 
@@ -657,52 +724,123 @@ export class WebMParser {
   } {
     const data = track.data
 
-    // Try to find explicit elements first
-    const channelsElement = this.findElement(data, WebMParser.ELEMENTS.Channels)
-    const sampleRateElement = this.findElement(data, WebMParser.ELEMENTS.SamplingFrequency)
-    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
-    const privateElement = this.findElement(data, WebMParser.ELEMENTS.CodecPrivate)
+    // Find Audio element first (similar to Video element in video tracks)
+    const audioElement = this.findElement(data, WebMParser.ELEMENTS.Audio)
+    let channels = 0
+    let sampleRate = 0
 
-    console.debug('Audio track elements:', {
-      explicit: {
-        channels: channelsElement?.data?.[0],
-        sampleRate: sampleRateElement?.data
-          ? Math.round(new DataView(sampleRateElement.data.buffer).getFloat32(0, false))
-          : null,
-        codec: codecElement?.data ? new TextDecoder().decode(codecElement.data) : null,
-      },
-      private: privateElement
-        ? {
-            size: privateElement.size,
-            data: Array.from(privateElement.data.slice(0, Math.min(32, privateElement.data.length)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+    if (audioElement?.data) {
+      // Try to find explicit elements within Audio element first
+      const channelsElement = this.findElement(audioElement.data, WebMParser.ELEMENTS.Channels)
+      const sampleRateElement = this.findElement(
+        audioElement.data,
+        WebMParser.ELEMENTS.SamplingFrequency
+      )
+
+      if (channelsElement?.data) {
+        channels = channelsElement.data[0]
+        // Validate channel count (should be between 1 and 8)
+        if (channels < 1 || channels > 8) {
+          console.debug('Invalid channel count in Audio element:', channels)
+          channels = 0 // Will try other methods
+        }
+      }
+
+      if (sampleRateElement?.data) {
+        // Sample rate is stored as a float64 in WebM
+        const view = new DataView(sampleRateElement.data.buffer, sampleRateElement.data.byteOffset)
+        try {
+          sampleRate = Math.round(view.getFloat64(0, false)) // false = big-endian
+          // Validate sample rate (common rates: 8000 to 192000)
+          if (sampleRate < 8000 || sampleRate > 192000) {
+            console.debug('Invalid sample rate in Audio element:', sampleRate)
+            sampleRate = 0 // Will try other methods
           }
-        : null,
-    })
+        } catch (error) {
+          console.debug('Failed to read sample rate as float64, trying alternative methods')
+        }
+      }
+    }
 
-    // Use explicit elements or fall back to private data or defaults
-    const channels = channelsElement?.data?.[0] || 1
-    const sampleRate = sampleRateElement?.data
-      ? Math.round(new DataView(sampleRateElement.data.buffer).getFloat32(0, false))
-      : 44100
+    // If not found in Audio element, try scanning the entire track data
+    if (!channels || !sampleRate) {
+      console.debug('Audio metadata not found in Audio element, trying direct scan')
+
+      // Scan for both channels and sample rate in one pass
+      for (let i = 0; i < data.length - 9; i++) {
+        const currentByte = data[i]
+        const nextByte = data[i + 1]
+
+        // Check for Channels element (0x9f)
+        if (!channels && currentByte === 0x9f && (nextByte & 0x80) === 0x80) {
+          const channelValue = data[i + 2]
+          // Validate channel count
+          if (channelValue >= 1 && channelValue <= 8) {
+            channels = channelValue
+            console.debug('Found channels by scanning:', {
+              offset: i,
+              value: channels,
+              bytes: Array.from(data.slice(i, i + 3))
+                .map((b) => b.toString(16).padStart(2, '0'))
+                .join(' '),
+            })
+          }
+        }
+
+        // Check for SamplingFrequency element (0xb5)
+        if (!sampleRate && currentByte === 0xb5 && (nextByte & 0x80) === 0x80) {
+          const rateData = data.slice(i + 2, i + 10)
+          const view = new DataView(rateData.buffer, rateData.byteOffset)
+          try {
+            const rate = Math.round(view.getFloat64(0, false))
+            // Validate sample rate
+            if (rate >= 8000 && rate <= 192000) {
+              sampleRate = rate
+              console.debug('Found sample rate by scanning:', {
+                offset: i,
+                value: sampleRate,
+                bytes: Array.from(rateData)
+                  .map((b) => b.toString(16).padStart(2, '0'))
+                  .join(' '),
+              })
+            }
+          } catch (error) {
+            console.debug('Failed to parse sample rate at offset', i)
+          }
+        }
+
+        // Break if we found both values
+        if (channels && sampleRate) break
+      }
+    }
+
+    // Find codec
+    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     const codec = codecElement?.data
       ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
       : 'vorbis'
 
-    console.debug('Audio track final values:', {
-      channels: {
-        value: channels,
-        source: channelsElement?.data?.[0] ? 'explicit' : 'default',
-      },
-      sampleRate: {
-        value: sampleRate,
-        source: sampleRateElement?.data ? 'explicit' : 'default',
-      },
-      codec: {
-        value: codec,
-        source: codecElement?.data ? 'explicit' : 'default',
-      },
+    // Try to get more accurate metadata from codec private data if available
+    const privateElement = this.findElement(data, WebMParser.ELEMENTS.CodecPrivate)
+    if (privateElement?.data && codec === 'vorbis' && (!channels || !sampleRate)) {
+      const privateData = this.parseVorbisPrivateData(privateElement.data)
+      if (privateData.channels && !channels) {
+        channels = privateData.channels
+      }
+      if (privateData.sampleRate && !sampleRate) {
+        sampleRate = privateData.sampleRate
+      }
+    }
+
+    // Use fallback values if still not found or invalid
+    if (!channels || channels < 1 || channels > 8) channels = 2 // Most common fallback
+    if (!sampleRate || sampleRate < 8000 || sampleRate > 192000) sampleRate = 44100 // CD quality fallback
+
+    console.debug('Final audio track values:', {
+      codec,
+      channels,
+      sampleRate,
+      privateDataFound: !!privateElement?.data,
     })
 
     return {
