@@ -510,7 +510,12 @@ export class WebMParser {
         height = this.readUintFromElement(heightElement)
       }
       if (durationElement?.data) {
-        fps = Math.round(1_000_000_000 / this.readUintFromElement(durationElement))
+        const defaultDuration = this.readUintFromElement(durationElement)
+        fps = Math.round(1_000_000_000 / defaultDuration)
+        console.debug('DefaultDuration found in Video element:', {
+          defaultDuration,
+          calculatedFps: fps,
+        })
       }
     }
 
@@ -593,7 +598,7 @@ export class WebMParser {
       })
     }
 
-    // If FPS not found, try scanning the entire track data
+    // If FPS not found in Video element, try scanning the entire track data
     if (!fps) {
       console.debug('DefaultDuration not found in Video element, trying direct scan')
 
