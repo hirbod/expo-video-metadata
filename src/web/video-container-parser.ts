@@ -1,29 +1,43 @@
 // video-container-parser.ts
-import { MP4Parser } from './mp4-parser'
+import type { ParsedVideoMetadata, VideoContainer } from '../ExpoVideoMetadata.types'
 import { MOVParser } from './mov-parser'
-import { WebMParser } from './webm-parser'
-import { MKVParser } from './mkv-parser'
-import { AVIParser } from './avi-parser'
+import { MP4Parser } from './mp4-parser'
 import { TSParser } from './ts-parser'
-import type {
-  ParsedVideoMetadata,
-  VideoContainer,
-  VideoTrackMetadata,
-} from '../ExpoVideoMetadata.types'
+import { WebMParser } from './webm-parser'
 
+/**
+ * Main parser class that detects and handles different video container formats
+ * Supports MP4, MOV, WebM, MKV, AVI, and TS containers
+ */
 export class VideoContainerParser {
-  // Signature patterns for different container formats
+  /**
+   * Magic bytes/signatures used to identify container formats
+   * Each format starts with specific byte sequences:
+   * - MP4: 'ftyp' marker indicates ISO base media file
+   * - WEBM/MKV: EBML header marker (both use same signature)
+   * - MOV: 'moov' atom marker for QuickTime format
+   * - AVI: 'RIFF' marker for Audio Video Interleave
+   * - TS: Transport Stream sync byte (0x47) followed by specific bits
+   */
   private static readonly SIGNATURES = {
     MP4: [0x66, 0x74, 0x79, 0x70], // ftyp
     WEBM: [0x1a, 0x45, 0xdf, 0xa3], // EBML
+    MKV: [0x1a, 0x45, 0xdf, 0xa3], // Same as WEBM, differentiated by DocType
     MOV: [0x6d, 0x6f, 0x6f, 0x76], // moov
     AVI: [0x52, 0x49, 0x46, 0x46], // RIFF
-    MKV: [0x1a, 0x45, 0xdf, 0xa3], // Same as WEBM, differentiated by DocType
     TS: [0x47, 0x40, 0x00], // TS sync byte pattern
   }
 
   /**
    * Parse video container and extract metadata
+   * Process:
+   * 1. Read first 32 bytes to detect container type
+   * 2. Read entire file into memory
+   * 3. Route to appropriate parser based on container
+   * 4. Extract and return standardized metadata
+   *
+   * Note: WebM and MKV share the same signature but are differentiated
+   * by their DocType in the EBML header. The WebM parser handles both.
    */
   static async parseContainer(file: File | Blob): Promise<ParsedVideoMetadata> {
     // Read first 32 bytes for signature detection
@@ -41,10 +55,9 @@ export class VideoContainerParser {
           return await new MP4Parser(bytes).parse()
         case 'mov':
           return await new MOVParser(bytes).parse()
+        // WebM/MKV share same signature, differentiated by DocType
         case 'webm':
           return await new WebMParser(bytes).parse()
-        case 'mkv':
-          return await new MKVParser(bytes).parse()
         case 'ts':
           return await new TSParser(bytes).parse()
         default:
