@@ -1,3 +1,10 @@
+/**
+ * Parser for WebM/MKV container formats using EBML structure.
+ * Supports VP8/VP9/AV1 video and Vorbis/Opus audio codecs.
+ *
+ * @module WebMParser
+ */
+
 import type {
   ParsedVideoMetadata,
   VideoColorInfo,
@@ -9,7 +16,7 @@ import { BinaryReaderImpl } from './binary-reader'
 import { HdrDetector } from './hdr-detector'
 
 /**
- * Parser for WebM/MKV container formats using EBML structure
+ * Parser for WebM/MKV container formats using EBML structure.
  * - WebM is a subset of Matroska optimized for web delivery
  * - Both use EBML (Extensible Binary Meta Language) for data structure
  * - Supports VP8/VP9/AV1 video and Vorbis/Opus audio codecs
@@ -17,9 +24,11 @@ import { HdrDetector } from './hdr-detector'
 export class WebMParser {
   protected reader: BinaryReaderImpl
 
-  // EBML element IDs for WebM/MKV container format
-  // Each ID uniquely identifies different parts of the container structure
-  // IDs can be variable length, but common elements use fixed lengths
+  /**
+   * EBML element IDs for WebM/MKV container format.
+   * Each ID uniquely identifies different parts of the container structure.
+   * IDs can be variable length, but common elements use fixed lengths.
+   */
   protected static readonly ELEMENTS = {
     EBML: 0x1a45dfa3, // Root element that marks file as EBML (4 bytes)
     DocType: 0x4282, // Document type - 'webm' or 'matroska' (2 bytes)
@@ -71,12 +80,16 @@ export class WebMParser {
     ColourChromaSubsampling: 0x55b5,
   }
 
+  /**
+   * Creates a new WebM parser instance.
+   * @param data - The raw binary data of the WebM file
+   */
   constructor(data: Uint8Array) {
     this.reader = new BinaryReaderImpl(data)
   }
 
   /**
-   * Parses a WebM file and extracts video metadata
+   * Parses a WebM file and extracts video metadata.
    * @returns Promise<ParsedVideoMetadata> Object containing video metadata
    * @throws Error if file is not a valid WebM/MKV file or required elements are missing
    */
@@ -323,11 +336,15 @@ export class WebMParser {
   }
 
   /**
-   * Finds a specific EBML element in a data buffer
-   * Uses variable-length integer (VINT) parsing for element IDs and sizes
+   * Finds a specific EBML element in a data buffer.
+   * Uses variable-length integer (VINT) parsing for element IDs and sizes.
    * - VINT format allows compact representation of large numbers
    * - First byte indicates length and contains part of the value
    * - Remaining bytes contain the rest of the value
+   *
+   * @param data - The data buffer to search in
+   * @param targetId - The ID of the element to find
+   * @returns WebMElement | null The found element or null if not found
    */
   protected findElement(data: Uint8Array, targetId: number): WebMElement | null {
     let offset = 0
@@ -402,8 +419,8 @@ export class WebMParser {
   }
 
   /**
-   * Reads a complete EBML element from the current position
-   * @returns WebMElement if successfully read, null if not enough data
+   * Reads a complete EBML element from the current position.
+   * @returns WebMElement | null The read element or null if not enough data
    */
   protected readElement(): WebMElement | null {
     if (this.reader.remaining() < 2) return null
@@ -426,9 +443,9 @@ export class WebMParser {
   }
 
   /**
-   * Locates and parses the video track information from track data
-   * @param data Track entry data buffer
-   * @returns WebMElement containing video track data if found, null otherwise
+   * Locates and parses the video track information from track data.
+   * @param data - Track entry data buffer
+   * @returns WebMElement | null The video track data if found, null otherwise
    */
   protected findVideoTrack(data: Uint8Array): WebMElement | null {
     const reader = new BinaryReaderImpl(data)
@@ -508,6 +525,9 @@ export class WebMParser {
    * - First byte (0x84) indicates 4-byte integer
    * - Next 3 bytes contain duration in nanoseconds
    * - Must shift bytes into correct position for accurate timing
+   *
+   * @param track - The video track element to parse
+   * @returns Object containing width, height, codec, fps, and color info
    */
   protected parseVideoTrack(track: WebMElement): {
     width: number
@@ -739,12 +759,22 @@ export class WebMParser {
     return { width, height, codec, fps, colorInfo }
   }
 
+  /**
+   * Finds the codec information in the track data.
+   * @param data - The track data to search in
+   * @returns string The codec identifier
+   */
   private findCodec(data: Uint8Array): string {
     const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     if (!codecElement?.data) return ''
     return new TextDecoder().decode(codecElement.data)
   }
 
+  /**
+   * Finds and parses the audio track information.
+   * @param data - The track data to search in
+   * @returns Promise<WebMElement | null> The audio track element if found
+   */
   protected async findAudioTrack(data: Uint8Array): Promise<WebMElement | null> {
     const reader = new BinaryReaderImpl(data)
     let attempts = 0
@@ -807,6 +837,9 @@ export class WebMParser {
    * - Channel count
    * - Sample rate
    * - Codec identification (Vorbis/Opus)
+   *
+   * @param track - The audio track element to parse
+   * @returns Object containing audio metadata
    */
   protected parseAudioTrack(track: WebMElement): {
     hasAudio: boolean
@@ -969,7 +1002,9 @@ export class WebMParser {
   }
 
   /**
-   * Maps WebM codec IDs to readable names
+   * Maps WebM codec IDs to readable names.
+   * @param codecId - The codec ID from the WebM container
+   * @returns string The human-readable codec name
    */
   private mapCodecId(codecId: string): string {
     const codecMap: Record<string, string> = {
@@ -983,9 +1018,12 @@ export class WebMParser {
   }
 
   /**
-   * Reads an unsigned integer from an EBML element
-   * Used for timescale and other numeric metadata
-   * Handles big-endian byte order required by EBML spec
+   * Reads an unsigned integer from an EBML element.
+   * Used for timescale and other numeric metadata.
+   * Handles big-endian byte order required by EBML spec.
+   *
+   * @param element - The element to read from
+   * @returns number The unsigned integer value
    */
   protected readUintFromElement(element: WebMElement | null): number {
     if (!element || !element.data) return 0
@@ -1003,6 +1041,10 @@ export class WebMParser {
     }
   }
 
+  /**
+   * Returns default color information structure.
+   * @returns VideoColorInfo Default color info with null values
+   */
   private getDefaultColorInfo(): VideoColorInfo {
     return {
       matrixCoefficients: null,
@@ -1013,11 +1055,14 @@ export class WebMParser {
   }
 
   /**
-   * Recursively searches for Tracks element
+   * Recursively searches for Tracks element.
    * This is necessary because:
    * - MKV files can have deeper nesting than WebM
    * - Tracks element might be after Void or CRC elements
    * - Some encoders place Tracks in different locations
+   *
+   * @param data - The data to search in
+   * @returns WebMElement | null The Tracks element if found
    */
   protected findTracksElement(data: Uint8Array): WebMElement | null {
     // First try direct search
@@ -1067,33 +1112,15 @@ export class WebMParser {
   }
 
   /**
-   * Validates an EBML element's ID and size
-   * More permissive validation to handle various MKV structures
-   */
-  private isValidEBMLElement(id: number, size: number, remainingBytes: number): boolean {
-    // Known valid EBML IDs are typically 1-4 bytes
-    if (id > 0xffffffff) return false
-
-    // Size should be reasonable but allow larger elements
-    if (size < 0 || size > remainingBytes) return false
-
-    // Check for common EBML element IDs
-    const knownIds = Object.values(WebMParser.ELEMENTS)
-    if (knownIds.includes(id)) return true
-
-    // For unknown IDs, be more permissive
-    // Allow elements up to 1GB (some MKV files have large media blocks)
-    if (size > 1024 * 1024 * 1024) return false
-
-    return true
-  }
-
-  /**
-   * Special parser for EBML header elements
+   * Special parser for EBML header elements.
    * Uses direct byte comparison instead of VINT parsing because:
    * - Header elements always use fixed 2-byte IDs
    * - Size is always a single byte with top bit set
    * - More efficient than full VINT parsing for header elements
+   *
+   * @param data - The header data to parse
+   * @param targetId - The ID of the element to find
+   * @returns WebMElement | null The found element or null
    */
   protected findEBMLHeaderElement(data: Uint8Array, targetId: number): WebMElement | null {
     for (let i = 0; i < data.length - 1; i++) {
@@ -1122,6 +1149,11 @@ export class WebMParser {
     return null
   }
 
+  /**
+   * Parses Vorbis codec private data to extract detailed audio format information.
+   * @param data - The private data to parse
+   * @returns Object containing channels and sample rate if found
+   */
   protected parseVorbisPrivateData(data: Uint8Array): {
     channels?: number
     sampleRate?: number
@@ -1225,6 +1257,10 @@ export class WebMParser {
    * └── MasteringMetadata (0x55d0)
    *     ├── LuminanceMax/Min
    *     └── MaxCLL/MaxFALL
+   *
+   * @param data - The color data to parse
+   * @param codec - The video codec (optional)
+   * @returns VideoColorInfo The parsed color information
    */
   private parseColorInfo(data: Uint8Array, codec = ''): VideoColorInfo {
     try {
@@ -1432,64 +1468,6 @@ export class WebMParser {
         return 'bt2020c'
       default:
         return 'unspecified'
-    }
-  }
-
-  private parseAV1ColorInfo(data: Uint8Array): VideoColorInfo {
-    try {
-      // AV1 sequence header parsing similar to MP4
-      // First byte: marker bit (1) + version (7 bits)
-      const version = data[0] & 0x7f
-      if (data[0] >> 7 !== 1 || version !== 1) {
-        console.debug('Invalid AV1 config version:', {
-          marker: data[0] >> 7,
-          version,
-        })
-        return this.getDefaultColorInfo()
-      }
-
-      // Profile and level info
-      const profile = (data[1] >> 5) & 0x7
-      const level = data[1] & 0x1f
-      const tier = (data[2] >> 7) & 0x1
-      const highBitDepth = (data[2] >> 6) & 0x1
-      const twelveBit = (data[2] >> 5) & 0x1
-      const monochrome = (data[2] >> 4) & 0x1
-      const chromaSubsamplingX = (data[2] >> 3) & 0x1
-      const chromaSubsamplingY = (data[2] >> 2) & 0x1
-      const chromaSamplePosition = data[2] & 0x3
-
-      console.debug('AV1 config:', {
-        profile,
-        level,
-        tier,
-        highBitDepth,
-        twelveBit,
-        monochrome,
-        chromaSubsamplingX,
-        chromaSubsamplingY,
-        chromaSamplePosition,
-      })
-
-      // For AV1, we can determine HDR capability from profile and bit depth
-      const isHdrCapable = profile >= 2 && (highBitDepth || twelveBit)
-
-      return isHdrCapable
-        ? {
-            matrixCoefficients: 'bt2020nc',
-            transferCharacteristics: 'smpte2084',
-            primaries: 'bt2020',
-            fullRange: true,
-          }
-        : {
-            matrixCoefficients: 'bt709',
-            transferCharacteristics: 'bt709',
-            primaries: 'bt709',
-            fullRange: true,
-          }
-    } catch (error) {
-      console.debug('Error parsing AV1 color info:', error)
-      return this.getDefaultColorInfo()
     }
   }
 }
