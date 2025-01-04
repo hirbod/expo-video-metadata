@@ -13,7 +13,6 @@ import type {
 } from '../ExpoVideoMetadata.types'
 // WebM parser with full support for video/audio codecs and metadata parsing
 import { BinaryReaderImpl } from './binary-reader'
-import { HdrDetector } from './hdr-detector'
 
 /**
  * Parser for WebM/MKV container formats using EBML structure.
@@ -634,15 +633,6 @@ export class WebMParser {
         const nextByte = data[i - 1]
         const valueByte = data[i]
 
-        /*
-        console.debug('Scanning backward:', {
-          offset: i - 2,
-          bytes: Array.from(data.slice(i - 2, i + 1))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' '),
-        })
-            */
-
         // Check for PixelHeight element (0xba) followed by size marker
         // 0x82 indicates 2-byte size, 0x81 indicates 1-byte size
         if (!height && currentByte === 0xba && (nextByte === 0x82 || nextByte === 0x81)) {
@@ -751,7 +741,7 @@ export class WebMParser {
               .map((b) => b.toString(16).padStart(2, '0'))
               .join(' '),
           })
-          colorInfo = HdrDetector.parseVP9ColorInfo(privateDataElement.data)
+          colorInfo = this.parseColorInfo(privateDataElement.data, codec)
         }
       }
     }
@@ -1360,49 +1350,60 @@ export class WebMParser {
     }
   }
 
-  private mapMkvColorPrimaries(value: number, codec = '', matrix: number | null = null): string {
-    // Values from https://www.matroska.org/technical/elements.html#Colour
+  /**
+   * Maps matrix coefficients values to standard strings.
+   * Values from ISO/IEC 23091-2:2019
+   *
+   * @param value - Matrix coefficients value from container
+   * @returns String identifier or null if unknown
+   */
+  private mapMkvMatrixCoefficients(value: number): string | null {
     switch (value) {
+      case 0:
+        return 'rgb' // Identity/RGB
       case 1:
-        // For VP9:
-        // - If all values are 1, it means bt709
-        // - Otherwise, value 1 means bt470bg
-        // For AV1, value 1 means bt470bg
-        if (codec === 'V_VP9' && matrix === 1) {
-          return 'bt709'
-        }
-        return 'bt470bg'
+        return 'bt709' // ITU-R BT.709
       case 2:
         return 'unspecified'
       case 4:
-        return 'bt470m'
+        return 'fcc' // US FCC 73.682
       case 5:
-        return 'bt470bg'
+        return 'bt470bg' // ITU-R BT.470BG
       case 6:
-        return 'smpte170m'
+        return 'smpte170m' // ITU-R BT.601
       case 7:
-        return 'smpte240m'
+        return 'smpte240m' // SMPTE 240M
       case 8:
-        return 'film'
+        return 'ycocg' // YCgCo
       case 9:
-        return 'bt2020'
+        return 'bt2020nc' // BT.2020 non-constant
       case 10:
-        return 'smpte428'
+        return 'bt2020c' // BT.2020 constant
       case 11:
-        return 'smpte431'
+        return 'smpte2085' // SMPTE ST 2085
       case 12:
-        return 'smpte432'
-      case 16:
-        return 'bt2020'
-      case 22:
-        return 'ebu3213'
+        return 'chroma-derived-nc' // Chromaticity-derived non-constant
+      case 13:
+        return 'chroma-derived-c' // Chromaticity-derived constant
+      case 14:
+        return 'ictcp' // ICtCp
       default:
-        return 'unspecified'
+        return null
     }
   }
 
-  private mapMkvTransferCharacteristics(value: number, primaries: number | null = null): string {
-    // Values from https://www.matroska.org/technical/elements.html#Colour
+  /**
+   * Maps transfer characteristics values to standard strings.
+   * Values from ISO/IEC 23091-2:2019
+   *
+   * @param value - Transfer characteristics value from container
+   * @param primaries - Optional primaries value for context
+   * @returns String identifier or null if unknown
+   */
+  private mapMkvTransferCharacteristics(
+    value: number,
+    primaries: number | null = null
+  ): string | null {
     switch (value) {
       case 1:
         // For HDR content (primaries = 16 means BT.2020), value 1 means SMPTE 2084
@@ -1441,19 +1442,38 @@ export class WebMParser {
       case 18:
         return 'arib-std-b67'
       default:
-        return 'unspecified'
+        return null
     }
   }
 
-  private mapMkvMatrixCoefficients(value: number): string {
-    // Values from https://www.matroska.org/technical/elements.html#Colour
+  /**
+   * Maps color primaries values to standard strings.
+   * Values from ISO/IEC 23091-2:2019
+   *
+   * @param value - Color primaries value from container
+   * @param codec - Optional codec string for context
+   * @param matrix - Optional matrix coefficients for context
+   * @returns String identifier or null if unknown
+   */
+  private mapMkvColorPrimaries(
+    value: number,
+    codec = '',
+    matrix: number | null = null
+  ): string | null {
     switch (value) {
       case 1:
-        return 'bt709'
+        // For VP9:
+        // - If all values are 1, it means bt709
+        // - Otherwise, value 1 means bt470bg
+        // For AV1, value 1 means bt470bg
+        if (codec === 'V_VP9' && matrix === 1) {
+          return 'bt709'
+        }
+        return 'bt470bg'
       case 2:
         return 'unspecified'
       case 4:
-        return 'fcc'
+        return 'bt470m'
       case 5:
         return 'bt470bg'
       case 6:
@@ -1461,13 +1481,21 @@ export class WebMParser {
       case 7:
         return 'smpte240m'
       case 8:
-        return 'ycocg'
+        return 'film'
       case 9:
-        return 'bt2020nc'
+        return 'bt2020'
       case 10:
-        return 'bt2020c'
+        return 'smpte428'
+      case 11:
+        return 'smpte431'
+      case 12:
+        return 'smpte432'
+      case 16:
+        return 'bt2020'
+      case 22:
+        return 'ebu3213'
       default:
-        return 'unspecified'
+        return null
     }
   }
 }
