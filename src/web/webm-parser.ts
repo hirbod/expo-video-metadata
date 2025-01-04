@@ -12,7 +12,7 @@ import { HdrDetector } from './hdr-detector'
  * Parser for WebM/MKV container formats using EBML structure
  * - WebM is a subset of Matroska optimized for web delivery
  * - Both use EBML (Extensible Binary Meta Language) for data structure
- * - Supports VP8/VP9 video and Vorbis/Opus audio codecs
+ * - Supports VP8/VP9/AV1 video and Vorbis/Opus audio codecs
  */
 export class WebMParser {
   protected reader: BinaryReaderImpl
