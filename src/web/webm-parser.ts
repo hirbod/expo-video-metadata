@@ -121,7 +121,7 @@ export class WebMParser {
 
     // Parse duration info
     let duration = 0
-    let timescale = 1000000 // Default microseconds
+    let timescale = 1000000 // Default timescale: 1 million units = 1 second (microseconds)
 
     const info = this.findElement(segment.data, WebMParser.ELEMENTS.Info)
     if (info?.data) {
@@ -146,11 +146,13 @@ export class WebMParser {
             const view32 = new DataView(buffer32)
 
             // Copy bytes in big-endian order
+            // Some encoders use 4-byte float32 for duration to save space
+            // We pad from the right since EBML can omit leading zeros
             for (let i = 0; i < durationData.length; i++) {
               view32.setUint8(4 - durationData.length + i, durationData[i])
             }
 
-            // Read as float32
+            // Read as float32 (big-endian)
             rawDuration = view32.getFloat32(0, false) // false = big-endian
             success = Number.isFinite(rawDuration) && rawDuration > 0
 
@@ -164,16 +166,17 @@ export class WebMParser {
           }
 
           if (!success && durationData.length <= 8) {
-            // Try float64 for 8-byte duration
+            // Try float64 for 8-byte duration (standard format)
             const buffer64 = new ArrayBuffer(8)
             const view64 = new DataView(buffer64)
 
             // Copy bytes in big-endian order
+            // EBML can omit leading zeros, so we pad from the right
             for (let i = 0; i < durationData.length; i++) {
               view64.setUint8(8 - durationData.length + i, durationData[i])
             }
 
-            // Read as float64
+            // Read as float64 (big-endian)
             const duration64 = view64.getFloat64(0, false) // false = big-endian
             if (Number.isFinite(duration64) && duration64 > 0) {
               rawDuration = duration64
@@ -190,8 +193,10 @@ export class WebMParser {
           }
 
           if (!success) {
-            // Try integer interpretation
+            // Try integer interpretation as last resort
+            // Some encoders store duration as a simple integer
             let intValue = 0
+            // Combine bytes in big-endian order
             for (let i = 0; i < durationData.length; i++) {
               intValue = (intValue << 8) | durationData[i]
             }
@@ -208,7 +213,10 @@ export class WebMParser {
           }
 
           if (success) {
-            // Convert to seconds using timescale
+            // Convert to seconds:
+            // - rawDuration is in timescale units
+            // - timescale defines units per second (default 1,000,000 = microseconds)
+            // - We convert to nanoseconds (multiply by 1000) for precision
             duration = (rawDuration * timescale) / 1_000_000_000
 
             console.debug('Duration calculation:', {
@@ -266,7 +274,8 @@ export class WebMParser {
     // Calculate bitrate from file size and duration
     let bitrate = 0
     if (duration > 0) {
-      // Convert bytes to bits and divide by duration to get bits per second
+      // Convert bytes to bits (multiply by 8) and divide by duration
+      // This gives us bits per second (bps)
       bitrate = Math.round((this.reader.length * 8) / duration)
 
       console.debug('Bitrate calculation:', {
@@ -278,7 +287,7 @@ export class WebMParser {
             `File size: ${this.reader.length} bytes`,
             `Duration: ${duration} seconds`,
             `Bitrate = (${this.reader.length} * 8) / ${duration} = ${bitrate} bits/s`,
-            `Bitrate in Mbit/s = ${bitrate / 1_000_000}`,
+            `Bitrate in Mbit/s = ${bitrate / 1_000_000}`, // Convert to Mbps for readability
           ],
         },
       })
@@ -417,7 +426,8 @@ export class WebMParser {
       const id = reader.readVint()
       const size = reader.readVint()
 
-      // Track entry found (0xae or 0x2e)
+      // Track entry found (0xae = long form, 0x2e = short form)
+      // Some encoders use short form IDs to save space
       if (id === 0xae || id === 0x2e) {
         const trackData = reader.data.slice(reader.offset, reader.offset + size)
         const trackReader = new BinaryReaderImpl(trackData)
@@ -435,12 +445,20 @@ export class WebMParser {
           const subId = trackReader.readVint()
           const subSize = trackReader.readVint()
 
-          // Track type element (0x83)
+          // Track type element (0x83 = long form, 0x03 = short form)
+          // Type values:
+          // 1 = video
+          // 2 = audio
+          // 3 = complex
+          // 0x10 = logo
+          // 0x11 = subtitle
+          // 0x12 = buttons
+          // 0x20 = control
           if (subId === 0x83 || subId === 0x03) {
             const type = trackReader.read(1)[0]
             trackInfo.type = type
             if (type === 1) {
-              // 1 = video track
+              // Found video track (type = 1)
               return {
                 id,
                 size,
@@ -449,14 +467,15 @@ export class WebMParser {
               }
             }
           } else if (subId === 0x86) {
-            // CodecID
+            // CodecID (0x86) - String identifying the codec
             const codecData = trackReader.read(subSize)
             trackInfo.codec = new TextDecoder().decode(codecData)
           } else if (subId === 0xe0 || subId === 0x60) {
-            // Video
+            // Video element (0xe0 = long form, 0x60 = short form)
+            // Contains video-specific metadata like dimensions
             trackInfo.hasVideo = true
             const videoData = trackReader.read(subSize)
-            trackInfo.videoData = new Uint8Array(videoData.slice(0, 16))
+            trackInfo.videoData = new Uint8Array(videoData.slice(0, 16)) // Store first 16 bytes for debugging
           } else {
             trackReader.skip(subSize)
           }
@@ -536,13 +555,16 @@ export class WebMParser {
         const currentByte = data[i]
         const nextByte = data[i + 1]
 
-        // Process width
+        // Check for PixelWidth element (0xb0) followed by size marker
+        // 0x82 indicates 2-byte size, 0x81 indicates 1-byte size
         if (!width && currentByte === 0xb0 && (nextByte === 0x82 || nextByte === 0x81)) {
           const size = nextByte === 0x82 ? 2 : 1
           const widthData = data.slice(i + 2, i + 2 + size)
           if (size === 2) {
+            // For 2-byte width, combine bytes in big-endian order
             width = (widthData[0] << 8) | widthData[1]
           } else {
+            // For 1-byte width, use value directly
             width = widthData[0]
           }
           console.debug('Found width by scanning:', {
@@ -569,12 +591,16 @@ export class WebMParser {
             .join(' '),
         })
 
+        // Check for PixelHeight element (0xba) followed by size marker
+        // 0x82 indicates 2-byte size, 0x81 indicates 1-byte size
         if (!height && currentByte === 0xba && (nextByte === 0x82 || nextByte === 0x81)) {
           const size = nextByte === 0x82 ? 2 : 1
           const heightData = data.slice(i, i + size)
           if (size === 2) {
+            // For 2-byte height, combine bytes in big-endian order
             height = (heightData[0] << 8) | heightData[1]
           } else {
+            // For 1-byte height, use value directly
             height = heightData[0]
           }
           console.debug('Found height by backward scanning:', {
@@ -603,17 +629,23 @@ export class WebMParser {
       console.debug('DefaultDuration not found in Video element, trying direct scan')
 
       // Scan for DefaultDuration element bytes (0x23E383)
+      // In EBML format, DefaultDuration is a 3-byte element ID that defines frame duration
       for (let i = 0; i < data.length - 6; i++) {
+        // Check for DefaultDuration element marker (0x23 0xE3 0x83)
+        // This is followed by a 4-byte integer containing duration in nanoseconds
+        // We shift and combine bytes to form the full integer
         if (data[i] === 0x23 && data[i + 1] === 0xe3 && data[i + 2] === 0x83) {
           const durationData = data.slice(i + 3, i + 7)
 
-          // EBML variable integer format:
+          // EBML variable integer format for DefaultDuration:
           // First byte (0x84) indicates 4-byte integer
-          // Next 3 bytes contain the actual value
+          // Next 3 bytes contain the actual duration value in nanoseconds
+          // We shift and combine bytes to form the full integer
           const defaultDuration =
             ((durationData[1] << 24) | (durationData[2] << 16) | (durationData[3] << 8)) >>> 0
 
           // Convert nanoseconds per frame to frames per second
+          // 1 second = 1,000,000,000 nanoseconds
           const nanosPerSecond = 1_000_000_000
           fps = Math.round(nanosPerSecond / defaultDuration)
 
@@ -729,14 +761,17 @@ export class WebMParser {
   } {
     const data = track.data
 
-    // Find Audio element first (similar to Video element in video tracks)
+    // Find Audio element first (0xE1 in EBML)
+    // Audio element contains channel count, sample rate, and other audio-specific metadata
     const audioElement = this.findElement(data, WebMParser.ELEMENTS.Audio)
     let channels = 0
     let sampleRate = 0
 
     if (audioElement?.data) {
       // Try to find explicit elements within Audio element first
+      // Channels (0x9F) indicates number of audio channels (1=mono, 2=stereo, etc.)
       const channelsElement = this.findElement(audioElement.data, WebMParser.ELEMENTS.Channels)
+      // SamplingFrequency (0xB5) indicates audio sample rate in Hz (e.g., 44100, 48000)
       const sampleRateElement = this.findElement(
         audioElement.data,
         WebMParser.ELEMENTS.SamplingFrequency
@@ -745,6 +780,7 @@ export class WebMParser {
       if (channelsElement?.data) {
         channels = channelsElement.data[0]
         // Validate channel count (should be between 1 and 8)
+        // 1 = mono, 2 = stereo, 6 = 5.1, 8 = 7.1
         if (channels < 1 || channels > 8) {
           console.debug('Invalid channel count in Audio element:', channels)
           channels = 0 // Will try other methods
@@ -752,11 +788,16 @@ export class WebMParser {
       }
 
       if (sampleRateElement?.data) {
-        // Sample rate is stored as a float64 in WebM
+        // Sample rate is stored as a float64 in WebM/MKV format
+        // Common values: 44100 (CD), 48000 (DVD), 96000 (HD audio)
         const view = new DataView(sampleRateElement.data.buffer, sampleRateElement.data.byteOffset)
         try {
           sampleRate = Math.round(view.getFloat64(0, false)) // false = big-endian
           // Validate sample rate (common rates: 8000 to 192000)
+          // 8000 = telephone quality
+          // 44100 = CD quality
+          // 48000 = DVD quality
+          // 96000-192000 = HD audio
           if (sampleRate < 8000 || sampleRate > 192000) {
             console.debug('Invalid sample rate in Audio element:', sampleRate)
             sampleRate = 0 // Will try other methods
@@ -776,10 +817,16 @@ export class WebMParser {
         const currentByte = data[i]
         const nextByte = data[i + 1]
 
-        // Check for Channels element (0x9f)
+        // Check for Channels element (0x9F)
+        // Format: [0x9F][size marker][channel count]
+        // Size marker has top bit set (0x80-0xFF)
         if (!channels && currentByte === 0x9f && (nextByte & 0x80) === 0x80) {
           const channelValue = data[i + 2]
-          // Validate channel count
+          // Validate channel count (1-8 channels)
+          // 1 = mono
+          // 2 = stereo
+          // 6 = 5.1 surround
+          // 8 = 7.1 surround
           if (channelValue >= 1 && channelValue <= 8) {
             channels = channelValue
             console.debug('Found channels by scanning:', {
@@ -792,13 +839,19 @@ export class WebMParser {
           }
         }
 
-        // Check for SamplingFrequency element (0xb5)
+        // Check for SamplingFrequency element (0xB5)
+        // Format: [0xB5][size marker][8 bytes float64 value]
+        // Size marker has top bit set (0x80-0xFF)
         if (!sampleRate && currentByte === 0xb5 && (nextByte & 0x80) === 0x80) {
           const rateData = data.slice(i + 2, i + 10)
           const view = new DataView(rateData.buffer, rateData.byteOffset)
           try {
-            const rate = Math.round(view.getFloat64(0, false))
-            // Validate sample rate
+            const rate = Math.round(view.getFloat64(0, false)) // false = big-endian
+            // Validate sample rate against common audio sample rates
+            // 8000 Hz = telephone quality
+            // 44100 Hz = CD quality
+            // 48000 Hz = DVD quality
+            // 96000-192000 Hz = HD audio
             if (rate >= 8000 && rate <= 192000) {
               sampleRate = rate
               console.debug('Found sample rate by scanning:', {
@@ -819,13 +872,14 @@ export class WebMParser {
       }
     }
 
-    // Find codec
+    // Find codec ID (0x86) to determine audio format
     const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     const codec = codecElement?.data
       ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
-      : 'vorbis'
+      : 'vorbis' // Default to Vorbis if not specified
 
-    // Try to get more accurate metadata from codec private data if available
+    // Try to get more accurate metadata from codec private data (0x63A2)
+    // Vorbis codec private data contains detailed audio format information
     const privateElement = this.findElement(data, WebMParser.ELEMENTS.CodecPrivate)
     if (privateElement?.data && codec === 'vorbis' && (!channels || !sampleRate)) {
       const privateData = this.parseVorbisPrivateData(privateElement.data)
@@ -838,8 +892,11 @@ export class WebMParser {
     }
 
     // Use fallback values if still not found or invalid
-    if (!channels || channels < 1 || channels > 8) channels = 2 // Most common fallback
-    if (!sampleRate || sampleRate < 8000 || sampleRate > 192000) sampleRate = 44100 // CD quality fallback
+    // Most common defaults for web audio:
+    // - 2 channels (stereo)
+    // - 44100 Hz (CD quality)
+    if (!channels || channels < 1 || channels > 8) channels = 2
+    if (!sampleRate || sampleRate < 8000 || sampleRate > 192000) sampleRate = 44100
 
     console.debug('Final audio track values:', {
       codec,
@@ -914,12 +971,12 @@ export class WebMParser {
 
     // If not found, try to locate the Segment element first
     let offset = 0
-    const maxSearchBytes = 1024 // Only search first 1KB for Segment
+    const maxSearchBytes = 1024 // Only search first 1KB for Segment, as it should be near the start
 
     while (offset < Math.min(data.length, maxSearchBytes)) {
       const reader = new BinaryReaderImpl(data.slice(offset))
 
-      if (reader.remaining() < 2) break
+      if (reader.remaining() < 2) break // Need at least 2 bytes for VINT
 
       try {
         const id = reader.readVint()
@@ -929,6 +986,7 @@ export class WebMParser {
           offset,
           id: '0x' + id.toString(16),
           isSegment: id === WebMParser.ELEMENTS.Segment,
+          // Show next 16 bytes for debugging
           nextBytes: Array.from(data.slice(offset, offset + Math.min(16, data.length - offset)))
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' '),
@@ -984,13 +1042,18 @@ export class WebMParser {
    */
   protected findEBMLHeaderElement(data: Uint8Array, targetId: number): WebMElement | null {
     for (let i = 0; i < data.length - 1; i++) {
+      // EBML header element structure:
+      // [0-1] = 2-byte element ID
+      // [2]   = Size byte (top bit set, 0x80 + actual size)
+      // [3+]  = Element data
+
       // Check for 2-byte element ID match
       if (data[i] === targetId >> 8 && data[i + 1] === (targetId & 0xff)) {
         // Get size byte (usually 0x80 + actual size)
         const sizeByte = data[i + 2]
-        const size = sizeByte & 0x7f // Remove length marker bit
+        const size = sizeByte & 0x7f // Remove length marker bit (top bit)
 
-        // Get element data
+        // Get element data (starts after ID and size byte)
         const elementData = data.slice(i + 3, i + 3 + size)
 
         return {
@@ -1011,33 +1074,34 @@ export class WebMParser {
     try {
       console.debug('Parsing Vorbis private data:', {
         length: data.length,
+        // Show first 32 bytes or less for debugging
         firstBytes: Array.from(data.slice(0, Math.min(32, data.length)))
           .map((b) => b.toString(16).padStart(2, '0'))
           .join(' '),
       })
 
-      // Xiph lacing format:
-      // - First byte is number of packets
-      // - Then lengths for all but last packet
-      // - Then concatenated packet data
+      // Xiph lacing format structure:
+      // [0]   = Number of packets
+      // [1-N] = Packet lengths (except last packet)
+      // [N+]  = Concatenated packet data
       const numPackets = data[0]
-      let offset = 1
+      let offset = 1 // Start after packet count
       const lengths: number[] = []
       let totalLength = 0
 
-      // Read packet lengths
+      // Read packet lengths (all but last packet)
       for (let i = 0; i < numPackets - 1; i++) {
         let length = 0
         let val: number
         do {
           val = data[offset++]
           length += val
-        } while (val === 255)
+        } while (val === 255) // 255 means "add 255 and read another byte"
         lengths.push(length)
         totalLength += length
       }
 
-      // Last packet length is implicit
+      // Last packet length is implicit (remaining data)
       const lastPacketLength = data.length - offset - totalLength
       lengths.push(lastPacketLength)
 
@@ -1054,18 +1118,32 @@ export class WebMParser {
 
       // Check header magic
       if (
-        identHeader[0] !== 1 || // packet type
+        identHeader[0] !== 1 || // packet type 1 = identification header
+        // Bytes 1-6 should contain the string "vorbis"
         String.fromCharCode(...identHeader.slice(1, 7)) !== 'vorbis'
       ) {
         throw new Error('Invalid Vorbis header')
       }
 
       // Parse identification header fields
-      const view = new DataView(identHeader.buffer, identHeader.byteOffset + 7)
+      // Vorbis header structure:
+      // [0]     = Packet type (1 = identification header)
+      // [1-6]   = "vorbis" string
+      // [7-10]  = Version (uint32)
+      // [11]    = Number of channels (uint8)
+      // [12-15] = Sample rate (uint32)
+      // [16-19] = Bitrate maximum (uint32)
+      // [20-23] = Bitrate nominal (uint32)
+      // [24-27] = Bitrate minimum (uint32)
+      // [28]    = Blocksize values (uint8)
+      // [29]    = Framing flag (uint8)
+      const view = new DataView(identHeader.buffer, identHeader.byteOffset + 7) // Skip packet type and "vorbis" string
 
       const result = {
+        // Channels at byte 4 (after version)
         channels: view.getUint8(4),
-        sampleRate: view.getUint32(5, true),
+        // Sample rate at byte 5-8 (after channels)
+        sampleRate: view.getUint32(5, true), // true = little-endian for Vorbis
       }
 
       console.debug('Vorbis identification header:', {
