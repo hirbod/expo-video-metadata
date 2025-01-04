@@ -471,7 +471,7 @@ export class HdrDetector {
    * @param value - Matrix coefficients value from container
    * @returns String identifier or null if unknown
    */
-  private static mapMatrixCoefficients(value: number): string | null {
+  static mapMatrixCoefficients(value: number): string | null {
     switch (value) {
       case 0:
         return 'rgb' // Identity/RGB
@@ -513,7 +513,7 @@ export class HdrDetector {
    * @param value - Transfer characteristics value from container
    * @returns String identifier or null if unknown
    */
-  private static mapTransferCharacteristics(value: number): string | null {
+  static mapTransferCharacteristics(value: number): string | null {
     switch (value) {
       case 0:
         return null
@@ -565,7 +565,7 @@ export class HdrDetector {
    * @param value - Color primaries value from container
    * @returns String identifier or null if unknown
    */
-  private static mapColorPrimaries(value: number): string | null {
+  static mapColorPrimaries(value: number): string | null {
     switch (value) {
       case 0:
         return null

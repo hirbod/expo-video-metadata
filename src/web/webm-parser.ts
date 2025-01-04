@@ -6,6 +6,7 @@ import type {
 } from '../ExpoVideoMetadata.types'
 // WebM parser with full support for video/audio codecs and metadata parsing
 import { BinaryReaderImpl } from './binary-reader'
+import { HdrDetector } from './hdr-detector'
 
 /**
  * Parser for WebM/MKV container formats using EBML structure
@@ -57,6 +58,17 @@ export class WebMParser {
     ContentEncoding: 0x6240,
     ContentCompression: 0x5034,
     ContentCompSettings: 0x5035,
+    ColourRange: 0x55bb,
+    ColourTransfer: 0x55b9,
+    ColourPrimaries: 0x55ba,
+    ColourMatrix: 0x55b1,
+    MasteringMetadata: 0x55d0,
+    MaxCLL: 0x55bc,
+    MaxFALL: 0x55bd,
+    LuminanceMax: 0x55d9,
+    LuminanceMin: 0x55da,
+    ColourBitDepth: 0x55b2,
+    ColourChromaSubsampling: 0x55b5,
   }
 
   constructor(data: Uint8Array) {
@@ -261,7 +273,7 @@ export class WebMParser {
       throw new Error('No video track found')
     }
 
-    const { width, height, codec, fps } = this.parseVideoTrack(videoTrack)
+    const { width, height, codec, fps, colorInfo } = this.parseVideoTrack(videoTrack)
     const audioInfo = audioTrack
       ? this.parseAudioTrack(audioTrack)
       : {
@@ -299,7 +311,7 @@ export class WebMParser {
       rotation: 0,
       displayAspectWidth: width,
       displayAspectHeight: height,
-      colorInfo: this.getDefaultColorInfo(),
+      colorInfo,
       codec,
       duration,
       fileSize: this.reader.length,
@@ -502,17 +514,32 @@ export class WebMParser {
     height: number
     codec: string
     fps: number
+    colorInfo: VideoColorInfo
   } {
     const data = track.data
     let width = 0
     let height = 0
     let fps = 0
+    let colorInfo = this.getDefaultColorInfo()
+
+    // Find codec first since we need it for color mapping
+    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
+    const codec = codecElement?.data
+      ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
+      : ''
 
     // Find video-specific elements
     const videoElement = this.findElement(data, WebMParser.ELEMENTS.Video)
 
-    // Try to find dimensions in Video element first
     if (videoElement?.data) {
+      console.debug('Found Video element:', {
+        length: videoElement.data.length,
+        hex: Array.from(videoElement.data)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(' '),
+      })
+
+      // Try to find dimensions in Video element first
       const widthElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelWidth)
       const heightElement = this.findElement(videoElement.data, WebMParser.ELEMENTS.PixelHeight)
 
@@ -536,6 +563,9 @@ export class WebMParser {
           calculatedFps: fps,
         })
       }
+
+      // Try to find color info in Video element
+      colorInfo = this.parseColorInfo(videoElement.data, codec)
     }
 
     // If dimensions not found in Video element, try track data directly
@@ -584,12 +614,14 @@ export class WebMParser {
         const nextByte = data[i - 1]
         const valueByte = data[i]
 
+        /*
         console.debug('Scanning backward:', {
           offset: i - 2,
           bytes: Array.from(data.slice(i - 2, i + 1))
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' '),
         })
+            */
 
         // Check for PixelHeight element (0xba) followed by size marker
         // 0x82 indicates 2-byte size, 0x81 indicates 1-byte size
@@ -675,13 +707,36 @@ export class WebMParser {
       }
     }
 
-    // Find codec
-    const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
-    const codec = codecElement?.data
-      ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
-      : ''
+    // If no color info found in Video element, try track level
+    if (
+      !colorInfo.matrixCoefficients &&
+      !colorInfo.transferCharacteristics &&
+      !colorInfo.primaries
+    ) {
+      // Try to find color info in track data
+      colorInfo = this.parseColorInfo(data, codec)
 
-    return { width, height, codec, fps }
+      // If still no color info and codec is VP9, try codec private data
+      if (
+        codec === 'V_VP9' &&
+        !colorInfo.matrixCoefficients &&
+        !colorInfo.transferCharacteristics &&
+        !colorInfo.primaries
+      ) {
+        const privateDataElement = this.findElement(data, WebMParser.ELEMENTS.CodecPrivate)
+        if (privateDataElement?.data) {
+          console.debug('Found VP9 private data:', {
+            length: privateDataElement.data.length,
+            hex: Array.from(privateDataElement.data)
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join(' '),
+          })
+          colorInfo = HdrDetector.parseVP9ColorInfo(privateDataElement.data)
+        }
+      }
+    }
+
+    return { width, height, codec, fps, colorInfo }
   }
 
   private findCodec(data: Uint8Array): string {
@@ -1156,6 +1211,285 @@ export class WebMParser {
     } catch (error) {
       console.debug('Failed to parse Vorbis private data:', error)
       return {}
+    }
+  }
+
+  /**
+   * Parses WebM/MKV color information including HDR metadata.
+   * Color information in WebM/MKV is stored hierarchically:
+   * Colour
+   * ├── MatrixCoefficients (0x55b1)
+   * ├── Range (0x55b2)
+   * ├── TransferCharacteristics (0x55b9)
+   * ├── Primaries (0x55ba)
+   * └── MasteringMetadata (0x55d0)
+   *     ├── LuminanceMax/Min
+   *     └── MaxCLL/MaxFALL
+   */
+  private parseColorInfo(data: Uint8Array, codec = ''): VideoColorInfo {
+    try {
+      console.debug('Color info parsing:', {
+        data: Array.from(data)
+          .map((b, i) => ({
+            offset: i,
+            hex: b.toString(16).padStart(2, '0'),
+            decimal: b,
+            ascii: b >= 32 && b <= 126 ? String.fromCharCode(b) : '.',
+            possibleElement: b === 0x55 ? 'Color element start' : '',
+          }))
+          .filter((_, i) => i < 32), // Only show first 32 bytes to avoid noise
+      })
+
+      // For H.264 in MKV/WebM, if no color info is present, use standard values
+      if (codec === 'V_MPEG4/ISO/AVC') {
+        return {
+          primaries: 'smpte170m',
+          transferCharacteristics: 'bt709',
+          matrixCoefficients: 'smpte170m',
+          fullRange: false,
+        }
+      }
+
+      // For VFW content, return null values as we can't make assumptions
+      if (codec === 'V_MS/VFW/FOURCC') {
+        return this.getDefaultColorInfo()
+      }
+
+      let primaries: number | null = null
+      let transfer: number | null = null
+      let matrix: number | null = null
+      let range: number | null = null
+
+      // Direct scan for color elements
+      for (let i = 0; i < data.length - 3; i++) {
+        // Check for element IDs starting with 0x55
+        if (data[i] !== 0x55) continue
+
+        const nextByte = data[i + 1]
+        const sizeMarker = data[i + 2]
+
+        // Only process if we have a size marker of 0x81 (single byte)
+        if (sizeMarker !== 0x81) continue
+
+        const value = data[i + 3]
+
+        console.debug('Found color element:', {
+          offset: i,
+          id: '0x55' + nextByte.toString(16),
+          value,
+          bytes: Array.from(data.slice(i, i + 4))
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join(' '),
+        })
+
+        switch (nextByte) {
+          case 0xba: // Primaries
+            primaries = value
+            break
+          case 0xb9: // Transfer
+            transfer = value
+            break
+          case 0xb1: // Matrix
+            matrix = value
+            break
+          case 0xbb: // Range
+            range = value
+            break
+        }
+
+        // Skip the element (ID + size marker + value)
+        i += 3
+      }
+
+      console.debug('Raw color values:', { primaries, transfer, matrix, range })
+
+      // Map the values according to the WebM/MKV specification
+      const colorInfo: VideoColorInfo = {
+        primaries: primaries !== null ? this.mapMkvColorPrimaries(primaries, codec, matrix) : null,
+        transferCharacteristics:
+          transfer !== null ? this.mapMkvTransferCharacteristics(transfer, primaries) : null,
+        matrixCoefficients: matrix !== null ? this.mapMkvMatrixCoefficients(matrix) : null,
+        fullRange: range !== null ? range === 2 : null,
+      }
+
+      console.debug('Color info mapping:', {
+        raw: { primaries, transfer, matrix, range },
+        mapped: colorInfo,
+      })
+
+      return colorInfo
+    } catch (error) {
+      console.debug('Error parsing color info:', error)
+      return this.getDefaultColorInfo()
+    }
+  }
+
+  private mapMkvColorPrimaries(value: number, codec = '', matrix: number | null = null): string {
+    // Values from https://www.matroska.org/technical/elements.html#Colour
+    switch (value) {
+      case 1:
+        // For VP9:
+        // - If all values are 1, it means bt709
+        // - Otherwise, value 1 means bt470bg
+        // For AV1, value 1 means bt470bg
+        if (codec === 'V_VP9' && matrix === 1) {
+          return 'bt709'
+        }
+        return 'bt470bg'
+      case 2:
+        return 'unspecified'
+      case 4:
+        return 'bt470m'
+      case 5:
+        return 'bt470bg'
+      case 6:
+        return 'smpte170m'
+      case 7:
+        return 'smpte240m'
+      case 8:
+        return 'film'
+      case 9:
+        return 'bt2020'
+      case 10:
+        return 'smpte428'
+      case 11:
+        return 'smpte431'
+      case 12:
+        return 'smpte432'
+      case 16:
+        return 'bt2020'
+      case 22:
+        return 'ebu3213'
+      default:
+        return 'unspecified'
+    }
+  }
+
+  private mapMkvTransferCharacteristics(value: number, primaries: number | null = null): string {
+    // Values from https://www.matroska.org/technical/elements.html#Colour
+    switch (value) {
+      case 1:
+        // For HDR content (primaries = 16 means BT.2020), value 1 means SMPTE 2084
+        // Otherwise, it means BT.709
+        return primaries === 16 ? 'smpte2084' : 'bt709'
+      case 2:
+        return 'unspecified'
+      case 4:
+        return 'gamma22'
+      case 5:
+        return 'gamma28'
+      case 6:
+        return 'smpte170m'
+      case 7:
+        return 'smpte240m'
+      case 8:
+        return 'linear'
+      case 9:
+        return 'log'
+      case 10:
+        return 'log_sqrt'
+      case 11:
+        return 'iec61966-2-4'
+      case 12:
+        return 'bt1361'
+      case 13:
+        return 'iec61966-2-1'
+      case 14:
+        return 'bt2020-10'
+      case 15:
+        return 'bt2020-12'
+      case 16:
+        return 'smpte2084'
+      case 17:
+        return 'smpte428'
+      case 18:
+        return 'arib-std-b67'
+      default:
+        return 'unspecified'
+    }
+  }
+
+  private mapMkvMatrixCoefficients(value: number): string {
+    // Values from https://www.matroska.org/technical/elements.html#Colour
+    switch (value) {
+      case 1:
+        return 'bt709'
+      case 2:
+        return 'unspecified'
+      case 4:
+        return 'fcc'
+      case 5:
+        return 'bt470bg'
+      case 6:
+        return 'smpte170m'
+      case 7:
+        return 'smpte240m'
+      case 8:
+        return 'ycocg'
+      case 9:
+        return 'bt2020nc'
+      case 10:
+        return 'bt2020c'
+      default:
+        return 'unspecified'
+    }
+  }
+
+  private parseAV1ColorInfo(data: Uint8Array): VideoColorInfo {
+    try {
+      // AV1 sequence header parsing similar to MP4
+      // First byte: marker bit (1) + version (7 bits)
+      const version = data[0] & 0x7f
+      if (data[0] >> 7 !== 1 || version !== 1) {
+        console.debug('Invalid AV1 config version:', {
+          marker: data[0] >> 7,
+          version,
+        })
+        return this.getDefaultColorInfo()
+      }
+
+      // Profile and level info
+      const profile = (data[1] >> 5) & 0x7
+      const level = data[1] & 0x1f
+      const tier = (data[2] >> 7) & 0x1
+      const highBitDepth = (data[2] >> 6) & 0x1
+      const twelveBit = (data[2] >> 5) & 0x1
+      const monochrome = (data[2] >> 4) & 0x1
+      const chromaSubsamplingX = (data[2] >> 3) & 0x1
+      const chromaSubsamplingY = (data[2] >> 2) & 0x1
+      const chromaSamplePosition = data[2] & 0x3
+
+      console.debug('AV1 config:', {
+        profile,
+        level,
+        tier,
+        highBitDepth,
+        twelveBit,
+        monochrome,
+        chromaSubsamplingX,
+        chromaSubsamplingY,
+        chromaSamplePosition,
+      })
+
+      // For AV1, we can determine HDR capability from profile and bit depth
+      const isHdrCapable = profile >= 2 && (highBitDepth || twelveBit)
+
+      return isHdrCapable
+        ? {
+            matrixCoefficients: 'bt2020nc',
+            transferCharacteristics: 'smpte2084',
+            primaries: 'bt2020',
+            fullRange: true,
+          }
+        : {
+            matrixCoefficients: 'bt709',
+            transferCharacteristics: 'bt709',
+            primaries: 'bt709',
+            fullRange: true,
+          }
+    } catch (error) {
+      console.debug('Error parsing AV1 color info:', error)
+      return this.getDefaultColorInfo()
     }
   }
 }
