@@ -25,6 +25,51 @@ export class MP4Parser {
   protected reader: BinaryReaderImpl
   protected boxes: MP4Box[] = []
   protected fragments = new Map<number, TrackFragment>()
+  // Cache for commonly accessed box paths
+  private boxCache = new Map<string, MP4Box>()
+
+  // Cache box types in Sets for O(1) lookup
+  private static readonly VIDEO_BOX_TYPES = new Set([
+    'avc1',
+    'hev1',
+    'hvc1',
+    'mp4v',
+    'vp08',
+    'vp09',
+    'av01',
+    // Apple ProRes family
+    'ap4h',
+    'apch',
+    'apcn',
+    'apcs',
+    'apco',
+    'aprh',
+    'aprn',
+    // Additional formats
+    'dvc1',
+    'mjp2',
+    'jpeg',
+  ])
+
+  private static readonly AUDIO_BOX_TYPES = new Set([
+    'mp4a',
+    'Opus',
+    'ec-3',
+    'ac-3',
+    'alac',
+    'fLaC',
+    'mlpa',
+    'dtsc',
+    'dtsh',
+    'dtsl',
+    'dtse',
+    'lpcm',
+    'twos',
+    'sowt',
+    'in24',
+    'raw ',
+    'dmlp',
+  ])
 
   constructor(data: Uint8Array) {
     this.reader = new BinaryReaderImpl(data)
@@ -578,15 +623,7 @@ export class MP4Parser {
       stsdBoxes.map((b) => ({ type: b.type, size: b.size }))
     )
 
-    // Find video codec box
-    const videoTrack =
-      this.findBox(stsdBoxes, 'avc1') ||
-      this.findBox(stsdBoxes, 'hev1') ||
-      this.findBox(stsdBoxes, 'hvc1') ||
-      this.findBox(stsdBoxes, 'mp4v') ||
-      this.findBox(stsdBoxes, 'vp08') ||
-      this.findBox(stsdBoxes, 'vp09') ||
-      this.findBox(stsdBoxes, 'av01')
+    const videoTrack = this.findVideoBox(stsdBoxes)
 
     if (videoTrack) {
       codec = videoTrack.type
@@ -770,12 +807,19 @@ export class MP4Parser {
    * @returns Promise<MP4Box | undefined> The audio track box if found
    */
   protected async findAudioTrack(moovBoxes: MP4Box[]): Promise<MP4Box | undefined> {
+    console.debug(
+      'Looking for audio track in moov boxes:',
+      moovBoxes.map((b) => ({ type: b.type, size: b.size }))
+    )
+
     for (const trak of moovBoxes.filter((box) => box.type === 'trak')) {
       const mdiaOffset = this.findBoxOffset(trak.data!, 'mdia')
+      console.debug('Found mdia offset for potential audio track:', mdiaOffset)
       if (mdiaOffset === -1) continue
 
       const mdiaData = trak.data!.subarray(mdiaOffset + 8)
       const hdlrOffset = this.findBoxOffset(mdiaData, 'hdlr')
+      console.debug('Found hdlr offset for potential audio track:', hdlrOffset)
       if (hdlrOffset === -1) continue
 
       const handlerOffset = hdlrOffset + 16
@@ -784,8 +828,31 @@ export class MP4Parser {
       const handlerType = new TextDecoder().decode(
         mdiaData.subarray(handlerOffset, handlerOffset + 4)
       )
+      console.debug('Found track handler type:', handlerType)
 
       if (handlerType === 'soun') {
+        // Let's also log the track's sample description box to see what audio format it contains
+        try {
+          const mdia = await this.parseBoxes(trak.data!.subarray(mdiaOffset))
+          const minf = this.findBox(mdia, 'minf')
+          if (minf) {
+            const minfBoxes = await this.parseBoxes(minf.data!)
+            const stbl = this.findBox(minfBoxes, 'stbl')
+            if (stbl) {
+              const stblBoxes = await this.parseBoxes(stbl.data!)
+              const stsd = this.findBox(stblBoxes, 'stsd')
+              if (stsd) {
+                const stsdBoxes = await this.parseBoxes(stsd.data!)
+                console.debug(
+                  'Audio track sample description boxes:',
+                  stsdBoxes.map((b) => ({ type: b.type, size: b.size }))
+                )
+              }
+            }
+          }
+        } catch (error) {
+          console.debug('Error inspecting audio track details:', error)
+        }
         return trak
       }
     }
@@ -811,104 +878,136 @@ export class MP4Parser {
    */
   protected async parseAudioMetadata(trak: MP4Box) {
     try {
-      // Parse track boxes hierarchy to find audio sample description
-      const trakBoxes = await this.parseBoxes(trak.data!)
-      const mdia = this.findBox(trakBoxes, 'mdia')
-      if (!mdia) throw new Error('No mdia box')
+      // Use the new findBoxInHierarchy method for audio metadata
+      const audioStsd = await this.findBoxInHierarchy(trak.data!, ['mdia', 'minf', 'stbl', 'stsd'])
+      if (!audioStsd) throw new Error('No stsd box found in hierarchy')
 
-      const mdiaBoxes = await this.parseBoxes(mdia.data!)
-      const minf = this.findBox(mdiaBoxes, 'minf')
-      if (!minf) throw new Error('No minf box')
+      const audioStsdBoxes = await this.parseBoxes(audioStsd.data!)
+      console.debug(
+        'Audio STSD boxes:',
+        audioStsdBoxes.map((b) => ({ type: b.type, size: b.size }))
+      )
 
-      const minfBoxes = await this.parseBoxes(minf.data!)
-      const stbl = this.findBox(minfBoxes, 'stbl')
-      if (!stbl) throw new Error('No stbl box')
+      const audioBox = this.findAudioBox(audioStsdBoxes)
+      if (!audioBox || !audioBox.data) throw new Error('No audio format box found')
 
-      const stblBoxes = await this.parseBoxes(stbl.data!)
-      const stsd = this.findBox(stblBoxes, 'stsd')
-      if (!stsd) throw new Error('No stsd box')
-
-      const stsdBoxes = await this.parseBoxes(stsd.data!)
-      const mp4a = this.findBox(stsdBoxes, 'mp4a')
-      if (!mp4a || !mp4a.data) throw new Error('No mp4a box')
-
-      // Parse fixed-position audio data from mp4a box:
+      // Parse fixed-position audio data:
       // - Bytes 16-17: Number of channels (uint16)
       // - Bytes 24-27: Sample rate (32-bit fixed-point)
-      const audioChannels = (mp4a.data[16] << 8) | mp4a.data[17]
+      const audioChannels = (audioBox.data[16] << 8) | audioBox.data[17]
       const sampleRate =
-        ((mp4a.data[24] << 24) | (mp4a.data[25] << 16) | (mp4a.data[26] << 8) | mp4a.data[27]) >>>
+        ((audioBox.data[24] << 24) |
+          (audioBox.data[25] << 16) |
+          (audioBox.data[26] << 8) |
+          audioBox.data[27]) >>>
         16 // Convert from 16.16 fixed-point
 
-      // Find ESDS box to determine codec
-      // ESDS box starts with 'esds' FourCC (0x65, 0x73, 0x64, 0x73)
-      const esdsStart = mp4a.data.indexOf(0x65, 28)
-      let codec = 'aac' // Default to AAC
-      if (
-        esdsStart > 0 &&
-        mp4a.data[esdsStart + 1] === 0x73 &&
-        mp4a.data[esdsStart + 2] === 0x64 &&
-        mp4a.data[esdsStart + 3] === 0x73
-      ) {
-        // Audio Object Type ID is at offset 21 from ESDS start
-        const objectTypeID = mp4a.data[esdsStart + 21]
-        console.debug('Audio Object Type ID:', objectTypeID.toString(16))
+      // Determine codec based on box type
+      let codec = ''
+      switch (audioBox.type) {
+        case 'mp4a': {
+          // For mp4a, we need to check the ESDS box for specific codec
+          const esdsStart = audioBox.data.indexOf(0x65, 28) // 'e' in 'esds'
+          if (
+            esdsStart > 0 &&
+            audioBox.data[esdsStart + 1] === 0x73 && // 's'
+            audioBox.data[esdsStart + 2] === 0x64 && // 'd'
+            audioBox.data[esdsStart + 3] === 0x73
+          ) {
+            const objectTypeID = audioBox.data[esdsStart + 21]
+            console.debug('MP4A Audio Object Type ID:', objectTypeID.toString(16))
 
-        // Map Audio Object Type ID to codec string
-        switch (objectTypeID) {
-          case 0x40:
-          case 0x41:
-          case 0x42:
-            codec = 'aac'
-            break
-          case 0x45:
-          case 0x46:
-          case 0x47:
-            codec = 'aac-he'
-            break
-          case 0x67:
-          case 0x68:
-          case 0xa5:
-            codec = 'ac3'
-            break
-          case 0x6b:
-            codec = 'mp3'
-            break
-          case 0xa6:
-            codec = 'e-ac3'
-            break
-          case 0xa9:
-            codec = 'dts'
-            break
-          case 0xaa:
-            codec = 'dts-hd'
-            break
-          case 0xab:
-            codec = 'dts-hd-ma'
-            break
-          case 0xac:
-            codec = 'truehd'
-            break
-          case 0xad:
-            codec = 'flac'
-            break
-          case 0xae:
-            codec = 'alac'
-            break
-          case 0xaf:
-            codec = 'opus'
-            break
-          case 0x6d:
-            codec = 'aac-he-v2'
-            break
-          case 0xdd:
-            codec = 'vorbis'
-            break
-          case 0xe1:
-            codec = 'pcm'
-            break
+            switch (objectTypeID) {
+              case 0x40:
+              case 0x41:
+              case 0x42:
+                codec = 'aac'
+                break
+              case 0x45:
+              case 0x46:
+              case 0x47:
+                codec = 'aac-he'
+                break
+              case 0x67:
+              case 0x68:
+              case 0xa5:
+                codec = 'ac3'
+                break
+              case 0x6b:
+                codec = 'mp3'
+                break
+              case 0x6d:
+                codec = 'aac-he-v2'
+                break
+              case 0xdd:
+                codec = 'vorbis'
+                break
+              case 0xe1:
+                codec = 'pcm'
+                break
+              default:
+                codec = 'aac' // Default to AAC if unknown
+            }
+          } else {
+            codec = 'aac' // Default if no ESDS
+          }
+          break
         }
+        case 'Opus':
+          codec = 'opus'
+          break
+        case 'mlpa':
+          codec = 'truehd'
+          break
+        case 'ec-3':
+          codec = 'e-ac3'
+          break
+        case 'ac-3':
+          codec = 'ac3'
+          break
+        case 'alac':
+          codec = 'alac'
+          break
+        case 'fLaC':
+          codec = 'flac'
+          break
+        case 'dtsc':
+          codec = 'dts'
+          break
+        case 'dtsh':
+          codec = 'dts-hd'
+          break
+        case 'dtsl':
+          codec = 'dts-hd-ma'
+          break
+        case 'dtse':
+          codec = 'dts-express'
+          break
+        case 'lpcm':
+          codec = 'lpcm'
+          break
+        case 'twos':
+          codec = 'twos' // Two's complement signed PCM
+          break
+        case 'sowt':
+          codec = 'sowt'
+          break
+        case 'in24':
+          codec = 'in24'
+          break
+        case 'raw ':
+          codec = 'raw '
+          break
+        default:
+          codec = audioBox.type.toLowerCase()
       }
+
+      console.debug('Parsed audio metadata:', {
+        codec,
+        channels: audioChannels,
+        sampleRate,
+        boxType: audioBox.type,
+      })
 
       return {
         hasAudio: true,
@@ -940,5 +1039,57 @@ export class MP4Parser {
       primaries: null,
       fullRange: null,
     }
+  }
+
+  protected findVideoBox(stsdBoxes: MP4Box[]): MP4Box | undefined {
+    for (const box of stsdBoxes) {
+      if (MP4Parser.VIDEO_BOX_TYPES.has(box.type)) {
+        return box
+      }
+    }
+    return undefined
+  }
+
+  protected findAudioBox(stsdBoxes: MP4Box[]): MP4Box | undefined {
+    for (const box of stsdBoxes) {
+      if (MP4Parser.AUDIO_BOX_TYPES.has(box.type)) {
+        return box
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Finds a box in the hierarchy using a path notation (e.g., 'moov.trak.mdia')
+   * Caches the result for subsequent lookups
+   */
+  protected findBoxInHierarchy(data: Uint8Array, path: string[]): Promise<MP4Box | undefined> {
+    const cacheKey = path.join('.')
+    if (this.boxCache.has(cacheKey)) {
+      return Promise.resolve(this.boxCache.get(cacheKey))
+    }
+
+    return this._findBoxInHierarchyInternal(data, path, cacheKey)
+  }
+
+  private async _findBoxInHierarchyInternal(
+    data: Uint8Array,
+    path: string[],
+    cacheKey: string
+  ): Promise<MP4Box | undefined> {
+    let currentData = data
+    let result: MP4Box | undefined
+
+    for (const boxType of path) {
+      const boxes = await this.parseBoxes(currentData)
+      result = this.findBox(boxes, boxType)
+      if (!result) return undefined
+      currentData = result.data!
+    }
+
+    if (result) {
+      this.boxCache.set(cacheKey, result)
+    }
+    return result
   }
 }
