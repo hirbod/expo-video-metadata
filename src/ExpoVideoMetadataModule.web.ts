@@ -28,7 +28,8 @@ export default {
       console.debug('Container metadata parsed:', metadata)
       console.warn('Color info:', metadata.colorInfo)
 
-      const aspectRatio = metadata.width / metadata.height
+      const aspectRatio =
+        (metadata.unrotatedWidth ?? metadata.width) / (metadata.unrotatedHeight ?? metadata.height)
       return {
         duration: metadata.duration,
         width: metadata.width,
@@ -49,7 +50,11 @@ export default {
           metadata.width,
           metadata.height
         ),
-        naturalOrientation: metadata.height > metadata.width ? 'Portrait' : 'Landscape',
+        naturalOrientation:
+          (metadata.unrotatedHeight ?? metadata.height) >
+          (metadata.unrotatedWidth ?? metadata.width)
+            ? 'Portrait'
+            : 'Landscape',
         aspectRatio,
         is16_9: Math.abs(aspectRatio - 16 / 9) < 0.01,
         location: null,
