@@ -130,12 +130,12 @@ export interface VideoTrackMetadata {
   rotation: number
   displayAspectWidth: number
   displayAspectHeight: number
-  codec: string
-  fps?: number
+  unrotatedWidth?: number
+  unrotatedHeight?: number
   colorInfo: VideoColorInfo
-  timing?: TimingInfo
+  fps?: number
+  codec: string
   videoBitrate?: number
-  audioBitrate?: number
 }
 
 export interface ParsedVideoMetadata extends VideoTrackMetadata {
