@@ -7,7 +7,6 @@ import type {
 
 import { BinaryReaderImpl } from './binary-reader'
 import { FpsDetector } from './fps-detector'
-import { HdrDetector } from './hdr-detector'
 import { MP4ColorParser } from './mp4-color'
 
 interface FragmentInfo {
@@ -535,52 +534,51 @@ export class MP4Parser {
       matrix.push(reader.readUint32())
     }
 
-    // Read dimensions (32-bit fixed-point)
-    // These are stored as 16.16 fixed-point numbers
-    const width = Math.round(reader.readUint32() / 65536) // Divide by 2^16 to convert fixed-point
-    const height = Math.round(reader.readUint32() / 65536)
+    console.debug('Transformation matrix:', {
+      matrix,
+      hex: matrix.map((n) => '0x' + n.toString(16)),
+      normalized: matrix.map((n) => n / 0x10000), // Convert from 16.16 fixed-point
+    })
 
-    // These will be adjusted if we find a pixel aspect ratio box (pasp)
-    let displayWidth = width
-    let displayHeight = height
+    // Calculate scale factors from matrix (in 16.16 fixed-point)
+    const scaleX = Math.sqrt(matrix[0] * matrix[0] + matrix[3] * matrix[3]) / 0x10000
+    const scaleY = Math.sqrt(matrix[1] * matrix[1] + matrix[4] * matrix[4]) / 0x10000
+
+    console.debug('Scale factors:', { scaleX, scaleY })
+
+    // Read dimensions from tkhd (these are the display dimensions)
+    let displayWidth = Math.round(reader.readUint32() / 65536) // Divide by 2^16 to convert fixed-point
+    let displayHeight = Math.round(reader.readUint32() / 65536)
+
+    // Initialize dimensions
+    let width = displayWidth
+    let height = displayHeight
+    let unrotatedWidth = displayWidth
+    let unrotatedHeight = displayHeight
 
     // Find media information box hierarchy
     const mdia = this.findBox(trakBoxes, 'mdia')
-    if (!mdia) {
-      throw new Error('No mdia box found')
-    }
+    if (!mdia) throw new Error('No mdia box found')
 
     const mdiaBoxes = await this.parseBoxes(mdia.data!)
     const minf = this.findBox(mdiaBoxes, 'minf')
-    if (!minf) {
-      throw new Error('No minf box found')
-    }
+    if (!minf) throw new Error('No minf box found')
 
     const minfBoxes = await this.parseBoxes(minf.data!)
     const stbl = this.findBox(minfBoxes, 'stbl')
-    if (!stbl) {
-      throw new Error('No stbl box found')
-    }
+    if (!stbl) throw new Error('No stbl box found')
 
-    // Sample description box contains codec configuration
     const stblBoxes = await this.parseBoxes(stbl.data!)
     const stsd = this.findBox(stblBoxes, 'stsd')
-    if (!stsd) {
-      throw new Error('No stsd box found')
-    }
+    if (!stsd) throw new Error('No stsd box found')
 
-    // Parse codec-specific configuration
     const stsdBoxes = await this.parseBoxes(stsd.data!)
     console.debug(
       'STSD box content:',
       stsdBoxes.map((b) => ({ type: b.type, size: b.size }))
     )
 
-    // Find video codec box - could be one of several types:
-    // avc1/avc3: H.264/AVC
-    // hev1/hvc1: HEVC/H.265
-    // vp09: VP9
-    // av01: AV1
+    // Find video codec box
     const videoTrack =
       this.findBox(stsdBoxes, 'avc1') ||
       this.findBox(stsdBoxes, 'hev1') ||
@@ -590,292 +588,172 @@ export class MP4Parser {
       this.findBox(stsdBoxes, 'vp09') ||
       this.findBox(stsdBoxes, 'av01')
 
-    console.debug(
-      'Video track found:',
-      videoTrack ? { type: videoTrack.type, size: videoTrack.size } : 'not found'
-    )
-
     if (videoTrack) {
-      console.debug('Video track data length:', videoTrack.data?.length)
-      console.debug(
-        'Video track first bytes:',
-        Array.from(videoTrack.data?.slice(0, 16) || []).map((b) => b.toString(16))
-      )
-
-      const videoBoxes = await this.parseBoxes(videoTrack.data!)
-      console.debug(
-        'Video track boxes:',
-        videoBoxes.map((b) => ({ type: b.type, size: b.size }))
-      )
-
-      // Parse codec and codec-specific data
       codec = videoTrack.type
-      let colorInfo = this.getDefaultColorInfo()
 
-      if (codec === 'avc1') {
-        // AVC configuration box contains profile and level
-        const avcC = this.findBox(videoBoxes, 'avcC')
-        if (avcC?.data) {
-          // Byte 2 is profile, byte 4 is level
-          const profile = avcC.data[1]
-          const level = avcC.data[3]
-          // Format as per RFC 6381
-          codec = `avc1.${profile.toString(16).padStart(2, '0')}${level.toString(16).padStart(2, '0')}`
-        }
-      } else if (codec === 'hev1' || codec === 'hvc1') {
-        // HEVC configuration box
-        const hvcC = this.findBox(videoBoxes, 'hvcC')
-        if (hvcC?.data) {
-          // Byte 2 bits 0-4 are profile, byte 13 is level
-          const profile = hvcC.data[1] & 0x1f // Mask to get last 5 bits
-          const level = hvcC.data[12]
-          codec = `${codec}.${profile.toString(16)}${level.toString(16)}`
-        }
-      } else if (codec === 'vp09') {
-        // VP9 configuration is stored directly in the sample entry
-        if (videoTrack.data && videoTrack.data.length >= 86) {
-          console.debug(
-            'VP9 Raw Data:',
-            Array.from(videoTrack.data.slice(78, 82)).map((b) => b.toString(16))
-          )
-          colorInfo = MP4ColorParser.parseVP9ColorInfo(videoTrack.data)
+      // Get the actual coded dimensions from the video sample entry
+      if (stsd?.data) {
+        // Skip version and entry count (8 bytes)
+        const stsdReader = new BinaryReaderImpl(stsd.data)
+        stsdReader.skip(8)
+
+        // Log the first 100 bytes for debugging
+        console.debug(
+          'STSD box data (first 100 bytes):',
+          Array.from(stsdReader.data.slice(0, 100)).map((b) => '0x' + b.toString(16))
+        )
+
+        // In an AVC1 box:
+        // - First 8 bytes: size + type ('avc1')
+        // - Next 6 bytes: reserved
+        // - Next 2 bytes: data reference index
+        // - Next 16 bytes: predefined & reserved
+        // - Next 2 bytes: width
+        // - Next 2 bytes: height
+        const widthOffset = 32
+        const heightOffset = 34
+
+        // Get the dimensions directly from the avc1 box
+        const codedWidth = (stsdReader.data[widthOffset] << 8) | stsdReader.data[widthOffset + 1]
+        const codedHeight = (stsdReader.data[heightOffset] << 8) | stsdReader.data[heightOffset + 1]
+
+        console.debug('Raw dimension bytes:', {
+          width: [
+            '0x' + stsdReader.data[widthOffset].toString(16),
+            '0x' + stsdReader.data[widthOffset + 1].toString(16),
+          ],
+          height: [
+            '0x' + stsdReader.data[heightOffset].toString(16),
+            '0x' + stsdReader.data[heightOffset + 1].toString(16),
+          ],
+        })
+
+        if (codedWidth > 0 && codedHeight > 0 && codedWidth < 10000 && codedHeight < 10000) {
+          // These are the actual dimensions the video is encoded at
+          width = codedWidth
+          height = codedHeight
+          unrotatedWidth = codedWidth
+          unrotatedHeight = codedHeight
+          console.debug('Found coded dimensions:', { width, height })
+        } else {
+          console.debug('Invalid coded dimensions:', { codedWidth, codedHeight })
         }
       }
 
-      // Pixel Aspect Ratio box adjusts display dimensions
+      const videoBoxes = await this.parseBoxes(videoTrack.data!)
+
+      // Handle pixel aspect ratio
       const pasp = this.findBox(videoBoxes, 'pasp')
-      if (pasp) {
-        const paspReader = new BinaryReaderImpl(pasp.data!)
+      if (pasp?.data) {
+        const paspReader = new BinaryReaderImpl(pasp.data)
         const hSpacing = paspReader.readUint32()
         const vSpacing = paspReader.readUint32()
         if (hSpacing && vSpacing) {
-          // Adjust display width to maintain aspect ratio
-          displayWidth = Math.round(width * (hSpacing / vSpacing))
+          const pixelAspectRatio = hSpacing / vSpacing
+          console.debug('Pixel Aspect Ratio:', { hSpacing, vSpacing, ratio: pixelAspectRatio })
+
+          // The display dimensions should be adjusted by PAR
+          displayWidth = Math.round(width * pixelAspectRatio)
           displayHeight = height
         }
       }
 
-      // Bitrate box contains bandwidth information
+      // Calculate rotation from transformation matrix
+      let rotation = 0
+      if (matrix[0] === 0 && matrix[4] === 0) {
+        // 90° or 270° rotation
+        if (matrix[1] === 0x10000 && matrix[3] === -0x10000) {
+          rotation = 90
+          // Store unrotated (natural) dimensions first
+          unrotatedWidth = width
+          unrotatedHeight = height
+
+          // Then swap dimensions for the rotated view
+          const temp = width
+          width = height
+          height = temp
+
+          // Also swap display dimensions
+          const tempDisplay = displayWidth
+          displayWidth = displayHeight
+          displayHeight = tempDisplay
+        } else if (matrix[1] === -0x10000 && matrix[3] === 0x10000) {
+          rotation = 270
+          // Store unrotated (natural) dimensions first
+          unrotatedWidth = width
+          unrotatedHeight = height
+
+          // Then swap dimensions for the rotated view
+          const temp = width
+          width = height
+          height = temp
+
+          // Also swap display dimensions
+          const tempDisplay = displayWidth
+          displayWidth = displayHeight
+          displayHeight = tempDisplay
+        }
+      } else if (matrix[0] === -0x10000 && matrix[4] === -0x10000) {
+        rotation = 180
+        // No dimension swapping needed for 180° rotation
+        unrotatedWidth = width
+        unrotatedHeight = height
+      } else {
+        // No rotation
+        unrotatedWidth = width
+        unrotatedHeight = height
+      }
+
+      // Get color info
+      let colorInfo = this.getDefaultColorInfo()
+      const colr = this.findBox(videoBoxes, 'colr')
+      if (colr?.data) {
+        colorInfo = MP4ColorParser.parseColorInfo(colr.data)
+      }
+
+      // Get fps from mdhd
+      const mdhd = this.findBox(mdiaBoxes, 'mdhd')
+      if (mdhd?.data) {
+        const mdhdReader = new BinaryReaderImpl(mdhd.data)
+        const version = mdhdReader.readUint8()
+        mdhdReader.skip(3)
+        if (version === 1) mdhdReader.skip(16)
+        else mdhdReader.skip(8)
+
+        timescale = mdhdReader.readUint32()
+        const duration = version === 1 ? mdhdReader.readUint64() : mdhdReader.readUint32()
+
+        const stts = this.findBox(stblBoxes, 'stts')
+        if (stts?.data) {
+          const timing = FpsDetector.parseMP4TimingInfo(stts.data, timescale, Number(duration))
+          if (timing) fps = FpsDetector.calculateFps(timing)
+        }
+      }
+
+      // Get bitrate
       const btrt = this.findBox(videoBoxes, 'btrt')
       if (btrt?.data) {
         const btrtReader = new BinaryReaderImpl(btrt.data)
-        const bufferSize = btrtReader.readUint32() // Maximum buffer size
-        const maxBitrate = btrtReader.readUint32() // Peak bitrate
-        const avgBitrate = btrtReader.readUint32() // Average bitrate
-        videoBitrate = avgBitrate
+        btrtReader.skip(8) // Skip buffer and max bitrate
+        videoBitrate = btrtReader.readUint32()
+      }
+
+      return {
+        width,
+        height,
+        rotation,
+        displayAspectWidth: displayWidth,
+        displayAspectHeight: displayHeight,
+        unrotatedWidth,
+        unrotatedHeight,
+        colorInfo,
+        fps,
+        codec,
+        videoBitrate,
       }
     }
 
-    // Calculate rotation from transformation matrix
-    // The matrix is a 3x3 matrix stored as:
-    // | [0] [1] [2] |
-    // | [3] [4] [5] |
-    // | [6] [7] [8] |
-    let rotation = 0
-    if (matrix[0] === 0 && matrix[4] === 0) {
-      // 90° rotation: cos(90°)=0, -sin(90°)=-1, sin(90°)=1
-      if (matrix[1] === 0x10000 && matrix[3] === -0x10000) rotation = 90
-      // 270° rotation: cos(270°)=0, -sin(270°)=1, sin(270°)=-1
-      if (matrix[1] === -0x10000 && matrix[3] === 0x10000) rotation = 270
-    } else if (matrix[0] === -0x10000 && matrix[4] === -0x10000) {
-      // 180° rotation: cos(180°)=-1
-      rotation = 180
-    }
-
-    let colorInfo: VideoColorInfo = this.getDefaultColorInfo()
-    console.debug('Parsing color info')
-    if (videoTrack) {
-      const videoBoxes = await this.parseBoxes(videoTrack.data!)
-      console.debug(
-        'Video track boxes:',
-        videoBoxes.map((b) => ({ type: b.type, size: b.size }))
-      )
-
-      // Color information in MP4 can be found in multiple boxes, in order of preference:
-      // 1. colr: Standard color info box (ISO/IEC 14496-12)
-      // 2. mdcv: Mastering Display Color Volume (HDR10)
-      // 3. dvcC/dvvC: Dolby Vision Configuration
-      // 4. st2086: HDR10 Static Metadata
-      // 5. Codec-specific boxes (hvcC, vpcC, av1C, avcC)
-      // 6. clli: Content Light Level Information
-      const colr = this.findBox(videoBoxes, 'colr')
-      const mdcv = this.findBox(videoBoxes, 'mdcv')
-      const clli = this.findBox(videoBoxes, 'clli')
-      const dvcC = this.findBox(videoBoxes, 'dvcC')
-      const dvvC = this.findBox(videoBoxes, 'dvvC')
-      const st2086 = this.findBox(videoBoxes, 'st2086')
-      const hvcC = this.findBox(videoBoxes, 'hvcC')
-      const vpcC = this.findBox(videoBoxes, 'vpcC')
-      const av1C = this.findBox(videoBoxes, 'av1C')
-      const avcC = this.findBox(videoBoxes, 'avcC')
-
-      // Log presence of color info boxes for debugging
-      console.debug('Color info boxes found:', {
-        hasColr: !!colr,
-        hasMdcv: !!mdcv,
-        hasClli: !!clli,
-        hasDolbyVision: !!(dvcC || dvvC),
-        hasHdr10Static: !!st2086,
-        hasCodecConfig: !!(hvcC || vpcC || av1C || avcC),
-      })
-
-      // Parse color info in priority order. Each box type has its own format:
-      // - colr: Can be 'nclx' (ISO) or 'nclc' (Apple) type, contains primaries, transfer, and matrix
-      // - mdcv: Contains mastering display color volume metadata for HDR
-      // - dvcC/dvvC: Dolby Vision specific configuration
-      // - st2086: Static HDR metadata (MaxCLL, MaxFALL)
-      // - Codec boxes: Contain codec-specific color info
-      if (colr) {
-        console.debug('Found colr box:', {
-          size: colr.size,
-          dataLength: colr.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(colr.data!)
-      } else if (mdcv) {
-        console.debug('Found mdcv box:', {
-          size: mdcv.size,
-          dataLength: mdcv.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(mdcv.data!)
-      } else if (dvcC || dvvC) {
-        const dvBox = dvcC || dvvC
-        if (dvBox) {
-          console.debug('Found Dolby Vision box:', {
-            type: dvBox.type,
-            size: dvBox.size,
-            dataLength: dvBox.data?.length,
-          })
-          colorInfo = MP4ColorParser.parseColorInfo(dvBox.data!)
-        }
-      } else if (st2086) {
-        console.debug('Found HDR10 metadata box:', {
-          size: st2086.size,
-          dataLength: st2086.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(st2086.data!)
-      } else if (hvcC) {
-        // HEVC/H.265 configuration box
-        console.debug('Found HEVC config box:', {
-          size: hvcC.size,
-          dataLength: hvcC.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(hvcC.data!)
-      } else if (vpcC) {
-        // VP9 codec configuration box
-        console.debug('Found VP9 config box:', {
-          size: vpcC.size,
-          dataLength: vpcC.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(vpcC.data!)
-      } else if (av1C) {
-        // AV1 codec configuration box
-        console.debug('Found AV1 config box:', {
-          size: av1C.size,
-          dataLength: av1C.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(av1C.data!)
-      } else if (avcC) {
-        // AVC/H.264 configuration box
-        console.debug('Found AVC config box:', {
-          size: avcC.size,
-          dataLength: avcC.data?.length,
-        })
-        colorInfo = MP4ColorParser.parseColorInfo(avcC.data!)
-      } else {
-        // If no color info is found, use standard defaults based on resolution:
-        // - BT.709 for HD content (≥720p) as per ITU-R BT.709
-        // - BT.601 for SD content (<720p) as per ITU-R BT.601
-        console.warn(
-          'No color info boxes found in video track, using defaults based on resolution:',
-          {
-            width,
-            height,
-            defaults: height >= 720 ? 'BT.709' : 'BT.601',
-          }
-        )
-
-        colorInfo = {
-          matrixCoefficients: height >= 720 ? 'bt709' : 'bt601',
-          transferCharacteristics: height >= 720 ? 'bt709' : 'bt601',
-          primaries: height >= 720 ? 'bt709' : 'bt601',
-          fullRange: false, // Most videos use limited/studio range (16-235) by default
-        }
-      }
-
-      // Content Light Level Info (CLLI) can provide additional HDR metadata
-      // Check it last as it might upgrade SDR content to HDR if appropriate
-      if (clli && !HdrDetector.isHdr(colorInfo)) {
-        console.debug('Found content light level box:', {
-          size: clli.size,
-          dataLength: clli.data?.length,
-        })
-        const clliColorInfo = MP4ColorParser.parseColorInfo(clli.data!)
-        if (HdrDetector.isHdr(clliColorInfo)) {
-          colorInfo = clliColorInfo
-        }
-      }
-    }
-
-    // Get fps from mdhd
-    const mdhd = this.findBox(mdiaBoxes, 'mdhd')
-    if (mdhd) {
-      const mdhdReader = new BinaryReaderImpl(mdhd.data!)
-      const version = mdhdReader.readUint8()
-      mdhdReader.skip(3)
-
-      if (version === 1) {
-        mdhdReader.skip(16)
-      } else {
-        mdhdReader.skip(8)
-      }
-
-      timescale = mdhdReader.readUint32()
-      const duration = version === 1 ? mdhdReader.readUint64() : mdhdReader.readUint32()
-
-      const stts = this.findBox(stblBoxes, 'stts')
-      if (stts) {
-        const timing = FpsDetector.parseMP4TimingInfo(stts.data!, timescale, Number(duration))
-        if (timing) {
-          fps = FpsDetector.calculateFps(timing)
-        }
-      }
-    }
-
-    // Handle fragmented MP4s
-    if (!videoBitrate) {
-      const mvex = moovBoxes.find((box) => box.type === 'mvex')
-      if (mvex) {
-        const mvexBoxes = await this.parseBoxes(mvex.data!)
-        const trex = mvexBoxes.find((box) => box.type === 'trex')
-
-        if (trex && this.fragments.size > 0) {
-          const trackId =
-            (trex.data![4] << 24) | (trex.data![5] << 16) | (trex.data![6] << 8) | trex.data![7]
-
-          const fragment = this.fragments.get(trackId)
-          if (fragment) {
-            if (!fps && fragment.fragmentInfo.defaultSampleDuration && timescale) {
-              fps = 1 / (fragment.fragmentInfo.defaultSampleDuration / timescale)
-            }
-            if (fps && fragment.fragmentInfo.defaultSampleSize) {
-              videoBitrate = fragment.fragmentInfo.defaultSampleSize * 8 * fps
-            }
-          }
-        }
-      }
-    }
-
-    return {
-      width,
-      height,
-      rotation,
-      displayAspectWidth: displayWidth,
-      displayAspectHeight: displayHeight,
-      colorInfo,
-      fps,
-      codec,
-      videoBitrate,
-    }
+    throw new Error('No supported video codec found')
   }
 
   /**
