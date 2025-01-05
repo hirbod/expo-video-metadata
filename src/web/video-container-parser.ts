@@ -45,6 +45,11 @@ export class VideoContainerParser {
     const headerBytes = new Uint8Array(headerBuffer)
     const container = VideoContainerParser.detectContainer(headerBytes)
 
+    // If we don't support this container type, fail fast before reading the whole file
+    if (container === 'unknown' || container === 'avi') {
+      throw new Error('Unsupported container format')
+    }
+
     // Read the entire file
     const buffer = await file.arrayBuffer()
     const bytes = new Uint8Array(buffer)
@@ -78,14 +83,46 @@ export class VideoContainerParser {
       return 'ts'
     }
 
-    // Check for other containers
+    // First check for QuickTime specific atoms in the first 32 bytes
     for (let offset = 0; offset < bytes.length - 8; offset++) {
-      if (VideoContainerParser.matchSignature(bytes, offset, VideoContainerParser.SIGNATURES.MP4)) {
-        return 'mp4'
-      }
-      if (VideoContainerParser.matchSignature(bytes, offset, VideoContainerParser.SIGNATURES.MOV)) {
+      const atomType = new TextDecoder().decode(bytes.slice(offset + 4, offset + 8))
+
+      // QuickTime specific atoms that indicate a MOV file
+      // 'qt  ' and 'QT  ' use spaces (0x20) as padding
+      if (['mvhd', 'moov', 'qt  '].includes(atomType)) {
+        console.error('Found QuickTime atom:', atomType)
         return 'mov'
       }
+
+      // Check for ftyp
+      if (atomType === 'ftyp') {
+        // Look at major brand and compatible brands
+        const brandOffset = offset + 8
+        if (brandOffset + 4 <= bytes.length) {
+          const majorBrand = new TextDecoder().decode(bytes.slice(brandOffset, brandOffset + 4))
+          console.debug('Found major brand:', majorBrand)
+
+          // QuickTime major brands - must be exactly 4 bytes
+          // 'qt  ' and 'QT  ' use spaces (0x20) as padding
+          if (['qt  ', 'moov', 'QT  '].includes(majorBrand)) {
+            return 'mov'
+          }
+
+          // Check compatible brands if we have enough bytes
+          if (brandOffset + 16 <= bytes.length) {
+            const compatibleBrand = new TextDecoder().decode(
+              bytes.slice(brandOffset + 4, brandOffset + 8)
+            )
+            console.debug('Found compatible brand:', compatibleBrand)
+            if (['qt  ', 'moov', 'QT  '].includes(compatibleBrand)) {
+              return 'mov'
+            }
+          }
+
+          return 'mp4'
+        }
+      }
+
       if (VideoContainerParser.matchSignature(bytes, offset, VideoContainerParser.SIGNATURES.AVI)) {
         return 'avi'
       }
