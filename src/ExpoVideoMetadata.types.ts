@@ -121,7 +121,8 @@ export interface TimingInfo {
   timescale: number
   sampleTable: SampleEntry[]
   duration: number
-  totalSamples?: number
+  totalSamples: number
+  calculatedFps: number
 }
 
 export interface VideoTrackMetadata {
@@ -160,6 +161,11 @@ export type AudioCodec =
   | 'alac'
   | 'flac'
   | 'pcm'
+  | 'lpcm' // Linear PCM
+  | 'twos' // Two's Complement Signed PCM (QuickTime variant)
+  | 'sowt' // Little-endian PCM (QuickTime variant)
+  | 'in24' // 24-bit Integer PCM
+  | 'raw ' // Big-endian PCM
   | ''
 
 export type VideoCodec =
@@ -170,6 +176,16 @@ export type VideoCodec =
   | 'vp08' // VP8
   | 'vp09' // VP9
   | 'av01' // AV1
+  | 'ap4h' // Apple ProRes 4444
+  | 'apch' // Apple ProRes 422 HQ
+  | 'apcn' // Apple ProRes 422
+  | 'apcs' // Apple ProRes 422 LT
+  | 'apco' // Apple ProRes 422 Proxy
+  | 'aprh' // Apple ProRes RAW HQ
+  | 'aprn' // Apple ProRes RAW
+  | 'dvc1' // DV/DVCPRO
+  | 'mjp2' // Motion JPEG 2000
+  | 'jpeg' // Motion JPEG
   | ''
 
 export interface BoxHeader {
