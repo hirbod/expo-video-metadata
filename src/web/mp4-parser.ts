@@ -8,6 +8,7 @@ import type {
 import { BinaryReaderImpl } from './binary-reader'
 import { FpsDetector } from './fps-detector'
 import { HdrDetector } from './hdr-detector'
+import { MP4ColorParser } from './mp4-color'
 
 interface FragmentInfo {
   defaultSampleDescriptionIndex: number
@@ -637,7 +638,7 @@ export class MP4Parser {
             'VP9 Raw Data:',
             Array.from(videoTrack.data.slice(78, 82)).map((b) => b.toString(16))
           )
-          colorInfo = HdrDetector.parseVP9ColorInfo(videoTrack.data)
+          colorInfo = MP4ColorParser.parseVP9ColorInfo(videoTrack.data)
         }
       }
 
@@ -729,13 +730,13 @@ export class MP4Parser {
           size: colr.size,
           dataLength: colr.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(colr.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(colr.data!)
       } else if (mdcv) {
         console.debug('Found mdcv box:', {
           size: mdcv.size,
           dataLength: mdcv.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(mdcv.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(mdcv.data!)
       } else if (dvcC || dvvC) {
         const dvBox = dvcC || dvvC
         if (dvBox) {
@@ -744,42 +745,42 @@ export class MP4Parser {
             size: dvBox.size,
             dataLength: dvBox.data?.length,
           })
-          colorInfo = HdrDetector.parseMP4ColorInfo(dvBox.data!)
+          colorInfo = MP4ColorParser.parseColorInfo(dvBox.data!)
         }
       } else if (st2086) {
         console.debug('Found HDR10 metadata box:', {
           size: st2086.size,
           dataLength: st2086.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(st2086.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(st2086.data!)
       } else if (hvcC) {
         // HEVC/H.265 configuration box
         console.debug('Found HEVC config box:', {
           size: hvcC.size,
           dataLength: hvcC.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(hvcC.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(hvcC.data!)
       } else if (vpcC) {
         // VP9 codec configuration box
         console.debug('Found VP9 config box:', {
           size: vpcC.size,
           dataLength: vpcC.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(vpcC.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(vpcC.data!)
       } else if (av1C) {
         // AV1 codec configuration box
         console.debug('Found AV1 config box:', {
           size: av1C.size,
           dataLength: av1C.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(av1C.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(av1C.data!)
       } else if (avcC) {
         // AVC/H.264 configuration box
         console.debug('Found AVC config box:', {
           size: avcC.size,
           dataLength: avcC.data?.length,
         })
-        colorInfo = HdrDetector.parseMP4ColorInfo(avcC.data!)
+        colorInfo = MP4ColorParser.parseColorInfo(avcC.data!)
       } else {
         // If no color info is found, use standard defaults based on resolution:
         // - BT.709 for HD content (≥720p) as per ITU-R BT.709
@@ -808,7 +809,7 @@ export class MP4Parser {
           size: clli.size,
           dataLength: clli.data?.length,
         })
-        const clliColorInfo = HdrDetector.parseMP4ColorInfo(clli.data!)
+        const clliColorInfo = MP4ColorParser.parseColorInfo(clli.data!)
         if (HdrDetector.isHdr(clliColorInfo)) {
           colorInfo = clliColorInfo
         }
