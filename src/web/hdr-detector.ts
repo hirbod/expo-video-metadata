@@ -7,20 +7,12 @@ import type { VideoColorInfo } from '../ExpoVideoMetadata.types'
  * Supports:
  * - HDR10/HDR10+ (BT.2020 + PQ/SMPTE2084)
  * - Dolby Vision (SMPTE2084/BT.1361 + ICtCp)
- * - HLG (Hybrid Log-Gamma)
- * - Advanced HDR by Technicolor
+ * - HLG (BT.2020 + HLG/BT.2100-HLG)
+ * - Advanced HDR by Technicolor (BT.2020 + SMPTE428)
  */
 export class HdrDetector {
   /**
    * Determines if the given color information represents HDR content.
-   * Checks for various HDR formats:
-   * - HDR10/HDR10+ (BT.2020 + PQ)
-   * - HLG (BT.2020 + HLG)
-   * - Dolby Vision (PQ/BT.1361 + ICtCp)
-   * - Advanced HDR by Technicolor
-   *
-   * @param colorInfo - Color information to check
-   * @returns boolean True if HDR content is detected
    */
   static isHdr(colorInfo: VideoColorInfo): boolean {
     // HDR10/HDR10+
@@ -34,8 +26,8 @@ export class HdrDetector {
     // HLG (Hybrid Log-Gamma)
     const isHlg =
       colorInfo.primaries === 'bt2020' &&
-      (colorInfo.transferCharacteristics === 'hlg' ||
-        colorInfo.transferCharacteristics === 'arib-std-b67')
+      (colorInfo.transferCharacteristics === 'arib-std-b67' ||
+        colorInfo.transferCharacteristics === 'bt2100-hlg')
 
     // Dolby Vision
     const isDolbyVision =
@@ -47,7 +39,7 @@ export class HdrDetector {
     const isAdvancedHdr =
       colorInfo.primaries === 'bt2020' &&
       colorInfo.transferCharacteristics === 'smpte428' &&
-      colorInfo.matrixCoefficients === 'bt2020nc'
+      (colorInfo.matrixCoefficients === 'bt2020nc' || colorInfo.matrixCoefficients === 'bt2020c')
 
     return isHdr10 || isHlg || isDolbyVision || isAdvancedHdr
   }
