@@ -632,21 +632,43 @@ export class WebMParser {
       for (let i = data.length - 1; i >= 2; i--) {
         const currentByte = data[i - 2]
         const nextByte = data[i - 1]
-        const valueByte = data[i]
 
         // Check for PixelHeight element (0xba) followed by size marker
         // 0x82 indicates 2-byte size, 0x81 indicates 1-byte size
         if (!height && currentByte === 0xba && (nextByte === 0x82 || nextByte === 0x81)) {
           const size = nextByte === 0x82 ? 2 : 1
           const heightData = data.slice(i, i + size)
-          if (size === 2) {
-            // For 2-byte height, combine bytes in big-endian order
-            height = (heightData[0] << 8) | heightData[1]
-          } else {
-            // For 1-byte height, use value directly
-            height = heightData[0]
+
+          // For 2-byte height, combine bytes in big-endian order
+          height = size === 2 ? (heightData[0] << 8) | heightData[1] : heightData[0]
+
+          // Try forward scan if height seems wrong
+          if (height < 100) {
+            // Look for height element scanning forward
+            for (let j = 0; j < data.length - 3; j++) {
+              if (data[j] === 0xba && (data[j + 1] === 0x82 || data[j + 1] === 0x81)) {
+                const forwardSize = data[j + 1] === 0x82 ? 2 : 1
+                const forwardData = data.slice(j + 2, j + 2 + forwardSize)
+                const forwardHeight =
+                  forwardSize === 2 ? (forwardData[0] << 8) | forwardData[1] : forwardData[0]
+
+                if (forwardHeight > 100 && forwardHeight < 10000) {
+                  height = forwardHeight
+                  console.debug('Found better height scanning forward:', {
+                    offset: j,
+                    size: forwardSize,
+                    value: height,
+                    bytes: Array.from(data.slice(j, j + 2 + forwardSize))
+                      .map((b) => b.toString(16).padStart(2, '0'))
+                      .join(' '),
+                  })
+                  break
+                }
+              }
+            }
           }
-          console.debug('Found height by backward scanning:', {
+
+          console.debug('Found height by scanning:', {
             offset: i - 2,
             size,
             value: height,
