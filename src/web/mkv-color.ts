@@ -122,7 +122,7 @@ export class MkvColorParser {
 
   /**
    * Maps matrix coefficients values to standard strings.
-   * Values from ISO/IEC 23091-2:2019
+   * Values from ISO/IEC 23091-2:2021
    *
    * @param value - Matrix coefficients value from container
    * @returns String identifier or null if unknown
@@ -130,33 +130,35 @@ export class MkvColorParser {
   private static mapMatrixCoefficients(value: number): string | null {
     switch (value) {
       case 0:
-        return 'rgb' // Identity/RGB
+        return 'rgb'
       case 1:
-        return 'bt709' // ITU-R BT.709
+        return 'bt709'
       case 2:
         return 'unspecified'
       case 4:
-        return 'fcc' // US FCC 73.682
+        return 'fcc'
       case 5:
-        return 'bt470bg' // ITU-R BT.470BG
+        return 'bt470bg'
       case 6:
-        return 'smpte170m' // ITU-R BT.601
+        return 'smpte170m'
       case 7:
-        return 'smpte240m' // SMPTE 240M
+        return 'smpte240m'
       case 8:
-        return 'ycocg' // YCgCo
+        return 'ycocg'
       case 9:
-        return 'bt2020nc' // BT.2020 non-constant
+        return 'bt2020nc'
       case 10:
-        return 'bt2020c' // BT.2020 constant
+        return 'bt2020c'
       case 11:
-        return 'smpte2085' // SMPTE ST 2085
+        return 'smpte2085'
       case 12:
-        return 'chroma-derived-nc' // Chromaticity-derived non-constant
+        return 'chroma-derived-nc'
       case 13:
-        return 'chroma-derived-c' // Chromaticity-derived constant
+        return 'chroma-derived-c'
       case 14:
-        return 'ictcp' // ICtCp
+        return 'ictcp'
+      case 15:
+        return 'y-derived'
       default:
         return null
     }
@@ -164,7 +166,7 @@ export class MkvColorParser {
 
   /**
    * Maps transfer characteristics values to standard strings.
-   * Values from ISO/IEC 23091-2:2019
+   * Values from ISO/IEC 23091-2:2021
    *
    * @param value - Transfer characteristics value from container
    * @param primaries - Optional primaries value for context
@@ -211,6 +213,8 @@ export class MkvColorParser {
         return 'smpte428'
       case 18:
         return 'arib-std-b67'
+      case 19:
+        return 'bt2100-hlg'
       default:
         return null
     }
@@ -218,7 +222,7 @@ export class MkvColorParser {
 
   /**
    * Maps color primaries values to standard strings.
-   * Values from ISO/IEC 23091-2:2019
+   * Values from ISO/IEC 23091-2:2021
    *
    * @param value - Color primaries value from container
    * @param codec - Optional codec string for context
@@ -263,6 +267,8 @@ export class MkvColorParser {
       case 16:
         return 'bt2020'
       case 22:
+        return 'jedec-p22'
+      case 23:
         return 'ebu3213'
       default:
         return null
