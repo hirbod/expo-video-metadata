@@ -1,7 +1,7 @@
 // mov-parser.ts
-import { MP4Parser } from './mp4-parser'
+import type { MP4Box, ParsedVideoMetadata, VideoTrackMetadata } from '../ExpoVideoMetadata.types'
 import { BinaryReaderImpl } from './binary-reader'
-import type { MP4Box, VideoTrackMetadata, ParsedVideoMetadata } from '../ExpoVideoMetadata.types'
+import { MP4Parser } from './mp4-parser'
 
 export class MOVParser extends MP4Parser {
   // Additional QuickTime specific atoms
@@ -14,6 +14,7 @@ export class MOVParser extends MP4Parser {
 
   public async parse(): Promise<ParsedVideoMetadata> {
     const metadata = await super.parse()
+    console.warn('MOV metadata:', metadata)
     return {
       ...metadata,
       container: 'mov',
@@ -23,6 +24,7 @@ export class MOVParser extends MP4Parser {
   protected async parseVideoTrack(trak: MP4Box, moovBoxes: MP4Box[]): Promise<VideoTrackMetadata> {
     // Get base metadata from MP4 parser
     const baseMetadata = await super.parseVideoTrack(trak, moovBoxes)
+    console.debug('Base metadata from MOV:', baseMetadata)
 
     // Parse QuickTime specific boxes
     const trakBoxes = await this.parseBoxes(trak.data!)
@@ -31,6 +33,7 @@ export class MOVParser extends MP4Parser {
     if (stsd) {
       const stsdBoxes = await this.parseBoxes(stsd.data!)
 
+      console.debug('STSD boxes:', stsdBoxes)
       // Parse clean aperture if present
       const clap = this.findBox(stsdBoxes, MOVParser.QT_ATOMS.CLAP)
       if (clap) {
@@ -44,6 +47,7 @@ export class MOVParser extends MP4Parser {
       // Parse track aperture mode dimensions
       const tapt = this.findBox(trakBoxes, MOVParser.QT_ATOMS.TAPT)
       if (tapt) {
+        console.debug('TAPT box found', tapt)
         const { width, height } = await this.parseTapt(tapt)
         if (width && height) {
           // TAPT takes precedence over CLAP if both exist
@@ -57,6 +61,7 @@ export class MOVParser extends MP4Parser {
   }
 
   private parseClap(clap: MP4Box): { width?: number; height?: number } {
+    console.debug('Parsing CLAP box')
     const reader = new BinaryReaderImpl(clap.data!)
 
     const cleanApertureWidthN = reader.readUint32()
@@ -75,6 +80,7 @@ export class MOVParser extends MP4Parser {
   }
 
   private async parseTapt(tapt: MP4Box): Promise<{ width?: number; height?: number }> {
+    console.debug('Parsing TAPT box')
     const taptBoxes = await this.parseBoxes(tapt.data!)
 
     // Look for clef (clean aperture dimensions) box
