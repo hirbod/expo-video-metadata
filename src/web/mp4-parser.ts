@@ -27,6 +27,10 @@ export class MP4Parser {
   protected fragments = new Map<number, TrackFragment>()
   // Cache for commonly accessed box paths
   private boxCache = new Map<string, MP4Box>()
+  // Reuse TextDecoder instance
+  private static readonly textDecoder = new TextDecoder()
+  // Cache DataView for faster binary reads
+  private dataView: DataView
 
   // Cache box types in Sets for O(1) lookup
   private static readonly VIDEO_BOX_TYPES = new Set([
@@ -73,6 +77,17 @@ export class MP4Parser {
 
   constructor(data: Uint8Array) {
     this.reader = new BinaryReaderImpl(data)
+    this.dataView = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  }
+
+  // Optimized binary reading methods
+  private readUint32BE(offset: number): number {
+    return this.dataView.getUint32(offset, false) // false = big endian
+  }
+
+  private readBoxType(offset: number): string {
+    // Read 4 bytes as a string (box type)
+    return MP4Parser.textDecoder.decode(this.reader.data.subarray(offset, offset + 4))
   }
 
   public async parse(): Promise<ParsedVideoMetadata> {
@@ -127,24 +142,14 @@ export class MP4Parser {
     while (offset < data.length) {
       if (data.length - offset < 8) break
 
-      let size =
-        (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]
-
-      const type = new TextDecoder().decode(data.slice(offset + 4, offset + 8))
+      let size = this.readUint32BE(offset)
+      const type = this.readBoxType(offset + 4)
       let headerSize = 8
 
       // Handle 64-bit size
       if (size === 1 && data.length - offset >= 16) {
-        const highBits =
-          (data[offset + 8] << 24) |
-          (data[offset + 9] << 16) |
-          (data[offset + 10] << 8) |
-          data[offset + 11]
-        const lowBits =
-          (data[offset + 12] << 24) |
-          (data[offset + 13] << 16) |
-          (data[offset + 14] << 8) |
-          data[offset + 15]
+        const highBits = this.readUint32BE(offset + 8)
+        const lowBits = this.readUint32BE(offset + 12)
         size = highBits * 2 ** 32 + lowBits
         headerSize = 16
       }
@@ -195,12 +200,13 @@ export class MP4Parser {
       const tfhd = trafBoxes.find((box) => box.type === 'tfhd')
 
       if (tfhd?.data) {
-        // Track ID is at bytes 5-8 (after version and flags)
-        const trackId =
-          (tfhd.data[4] << 24) | (tfhd.data[5] << 16) | (tfhd.data[6] << 8) | tfhd.data[7]
+        const dataView = new DataView(tfhd.data.buffer, tfhd.data.byteOffset, tfhd.data.byteLength)
 
-        // Read flags from bytes 2-4
-        const flags = (tfhd.data[1] << 16) | (tfhd.data[2] << 8) | tfhd.data[3]
+        // Track ID is at bytes 4-7 (after version and flags)
+        const trackId = dataView.getUint32(4, false) // false = big endian
+
+        // Read flags from bytes 1-3
+        const flags = dataView.getUint32(0, false) & 0x00ffffff // Mask out version byte
 
         let offset = 8 // Start after track_ID
         const fragmentInfo: FragmentInfo = {
@@ -211,42 +217,25 @@ export class MP4Parser {
         }
 
         // Parse optional fields based on flags
-        // Each flag indicates presence of a specific field
         if (flags & 0x000001) offset += 8 // base-data-offset-present
         if (flags & 0x000002) {
           // sample-description-index-present
-          fragmentInfo.defaultSampleDescriptionIndex =
-            (tfhd.data[offset] << 24) |
-            (tfhd.data[offset + 1] << 16) |
-            (tfhd.data[offset + 2] << 8) |
-            tfhd.data[offset + 3]
+          fragmentInfo.defaultSampleDescriptionIndex = dataView.getUint32(offset, false)
           offset += 4
         }
         if (flags & 0x000008) {
           // default-sample-duration-present
-          fragmentInfo.defaultSampleDuration =
-            (tfhd.data[offset] << 24) |
-            (tfhd.data[offset + 1] << 16) |
-            (tfhd.data[offset + 2] << 8) |
-            tfhd.data[offset + 3]
+          fragmentInfo.defaultSampleDuration = dataView.getUint32(offset, false)
           offset += 4
         }
         if (flags & 0x000010) {
           // default-sample-size-present
-          fragmentInfo.defaultSampleSize =
-            (tfhd.data[offset] << 24) |
-            (tfhd.data[offset + 1] << 16) |
-            (tfhd.data[offset + 2] << 8) |
-            tfhd.data[offset + 3]
+          fragmentInfo.defaultSampleSize = dataView.getUint32(offset, false)
           offset += 4
         }
         if (flags & 0x000020) {
           // default-sample-flags-present
-          fragmentInfo.defaultSampleFlags =
-            (tfhd.data[offset] << 24) |
-            (tfhd.data[offset + 1] << 16) |
-            (tfhd.data[offset + 2] << 8) |
-            tfhd.data[offset + 3]
+          fragmentInfo.defaultSampleFlags = dataView.getUint32(offset, false)
         }
 
         this.fragments.set(trackId, { trackId, fragmentInfo })
@@ -303,22 +292,16 @@ export class MP4Parser {
   protected async parseBoxes(data: Uint8Array): Promise<MP4Box[]> {
     const boxes: MP4Box[] = []
     let offset = 0
+    const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength)
 
     while (offset < data.length) {
-      // Every box must start with a 32-bit size and 4-byte type
       if (data.length - offset < 8) break
 
-      // First 4 bytes are box size (big-endian)
-      const size =
-        (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]
-
+      const size = dataView.getUint32(offset, false) // false = big endian
       if (size <= 0 || size > data.length - offset) break
 
-      // Next 4 bytes are box type (FourCC)
-      const type = new TextDecoder().decode(data.slice(offset + 4, offset + 8))
+      const type = MP4Parser.textDecoder.decode(data.subarray(offset + 4, offset + 8))
 
-      // Box header is normally 8 bytes (4 for size + 4 for type)
-      // But some boxes have extended headers:
       let boxSize = size
       let headerSize = 8
 
@@ -339,34 +322,17 @@ export class MP4Parser {
         headerSize = 86
       }
 
-      // Check for 64-bit size field
-      // If size==1, the real size is in the next 8 bytes (64-bit)
       if (size === 1) {
         if (data.length - offset < 16) break
-
-        // Read high 32 bits
-        const highBits =
-          (data[offset + 8] << 24) |
-          (data[offset + 9] << 16) |
-          (data[offset + 10] << 8) |
-          data[offset + 11]
-
-        // Read low 32 bits
-        const lowBits =
-          (data[offset + 12] << 24) |
-          (data[offset + 13] << 16) |
-          (data[offset + 14] << 8) |
-          data[offset + 15]
-
-        // Combine into 64-bit size
+        const highBits = dataView.getUint32(offset + 8, false)
+        const lowBits = dataView.getUint32(offset + 12, false)
         boxSize = highBits * 2 ** 32 + lowBits
-        headerSize = 16 // 8 bytes original header + 8 bytes extended size
+        headerSize = 16
       }
 
       // Validate box size
       if (boxSize < headerSize || offset + boxSize > data.length) break
 
-      // Store box info and data (excluding header)
       boxes.push({
         type,
         size: boxSize,
@@ -406,28 +372,21 @@ export class MP4Parser {
    * @returns The byte offset where the box starts, or -1 if not found
    */
   protected findBoxOffset(data: Uint8Array, type: string): number {
+    const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
-    while (offset < data.length - 8) {
-      // -8 because we need at least size (4) + type (4)
-      // Read box size (32-bit big-endian)
-      const size =
-        (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]
 
-      // Read box type (4 characters)
-      const boxType = new TextDecoder().decode(data.slice(offset + 4, offset + 8))
+    while (offset < data.length - 8) {
+      const size = dataView.getUint32(offset, false)
+      const boxType = MP4Parser.textDecoder.decode(data.subarray(offset + 4, offset + 8))
 
       if (boxType === type) {
         return offset
       }
 
-      // Special cases for box size:
-      // size == 0: box extends to end of file
-      // size == 1: 64-bit size follows
       if (size === 0) break
       if (size === 1) {
-        if (data.length - offset < 16) break // Not enough data for 64-bit size
-        const headerSize = 16 // 8 bytes original header + 8 bytes extended size
-        offset += headerSize
+        if (data.length - offset < 16) break
+        offset += 16
       } else {
         offset += size
       }
@@ -744,9 +703,67 @@ export class MP4Parser {
       // Get color info
       let colorInfo = this.getDefaultColorInfo()
       const colr = this.findBox(videoBoxes, 'colr')
+      const mdcv = this.findBox(videoBoxes, 'mdcv')
+      const clli = this.findBox(videoBoxes, 'clli')
+      const dvcC = this.findBox(videoBoxes, 'dvcC')
+      const dvvC = this.findBox(videoBoxes, 'dvvC')
+      const st2086 = this.findBox(videoBoxes, 'st2086')
+      const hvcC = this.findBox(videoBoxes, 'hvcC')
+      const vpcC = this.findBox(videoBoxes, 'vpcC')
+      const av1C = this.findBox(videoBoxes, 'av1C')
+      const avcC = this.findBox(videoBoxes, 'avcC')
+
+      console.debug('Color info boxes found:', {
+        hasColr: !!colr,
+        hasMdcv: !!mdcv,
+        hasClli: !!clli,
+        hasDolbyVision: !!(dvcC || dvvC),
+        hasHdr10Static: !!st2086,
+        hasCodecConfig: !!(hvcC || vpcC || av1C || avcC),
+      })
+
+      // Try to get color info from boxes in priority order
       if (colr?.data) {
+        console.debug('Parsing colr box')
         colorInfo = MP4ColorParser.parseColorInfo(colr.data)
       }
+      if (!colorInfo.matrixCoefficients && mdcv?.data) {
+        console.debug('Parsing mdcv box')
+        colorInfo = MP4ColorParser.parseColorInfo(mdcv.data)
+      }
+      if (!colorInfo.matrixCoefficients && (dvcC?.data || dvvC?.data)) {
+        const dvBox = dvcC || dvvC
+        if (dvBox?.data) {
+          console.debug('Parsing Dolby Vision box')
+          colorInfo = MP4ColorParser.parseColorInfo(dvBox.data)
+        }
+      }
+      if (!colorInfo.matrixCoefficients && st2086?.data) {
+        console.debug('Parsing HDR10 static metadata box')
+        colorInfo = MP4ColorParser.parseColorInfo(st2086.data)
+      }
+      if (!colorInfo.matrixCoefficients && hvcC?.data) {
+        console.debug('Parsing HEVC config box')
+        colorInfo = MP4ColorParser.parseColorInfo(hvcC.data)
+      }
+      if (!colorInfo.matrixCoefficients && vpcC?.data) {
+        console.debug('Parsing VP9 config box')
+        colorInfo = MP4ColorParser.parseColorInfo(vpcC.data)
+      }
+      if (!colorInfo.matrixCoefficients && av1C?.data) {
+        console.debug('Parsing AV1 config box')
+        colorInfo = MP4ColorParser.parseColorInfo(av1C.data)
+      }
+      if (!colorInfo.matrixCoefficients && avcC?.data) {
+        console.debug('Parsing AVC config box')
+        colorInfo = MP4ColorParser.parseColorInfo(avcC.data)
+      }
+      if (!colorInfo.matrixCoefficients && clli?.data) {
+        console.debug('Parsing content light level box')
+        colorInfo = MP4ColorParser.parseColorInfo(clli.data)
+      }
+
+      console.debug('Final parsed color info:', colorInfo)
 
       // Get fps from mdhd
       const mdhd = this.findBox(mdiaBoxes, 'mdhd')
