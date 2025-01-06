@@ -4,16 +4,18 @@ import { BinaryReaderImpl } from './binary-reader'
 /**
  * Parser for MP4/MOV color information.
  * Handles color metadata parsing for MP4 and MOV container formats.
+ * Supports various color info sources including:
+ * - Codec configuration (AVC/HEVC/VP9/AV1)
+ * - Color info boxes (colr/nclx/nclc)
+ * - HDR metadata boxes (mdcv/clli)
+ * - Dolby Vision (dovi)
+ * - ICC profiles
  */
 export class MP4ColorParser {
   /**
    * Parses color information from MP4 container boxes.
-   * Handles various color info box types including:
-   * - nclx/nclc: Standard color info
-   * - mdcv: HDR mastering display metadata
-   * - clli: Content light level
-   * - dovi: Dolby Vision
-   * - ICC profiles
+   * Handles various color info box types and codec configurations.
+   * Follows ISO/IEC 23091-2:2021 specification for color space mapping.
    *
    * @param data - Raw box data to parse
    * @returns VideoColorInfo Color space and HDR metadata
@@ -21,33 +23,24 @@ export class MP4ColorParser {
   static parseColorInfo(data: Uint8Array): VideoColorInfo {
     try {
       const reader = new BinaryReaderImpl(data)
-      console.debug(
-        'Parsing color data of length:',
-        data.length,
-        'First bytes:',
-        Array.from(data.slice(0, 4))
-      )
+      const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
 
       // Version byte = 1 indicates codec configuration data
-      if (data[0] === 1) {
+      if (view.getUint8(0) === 1) {
+        const codecByte = view.getUint8(1)
         // Codec identification bytes:
         // 0x22: HEVC Main10 profile
         // 0x64/0x4d/0x42: AVC High/Main/Baseline profiles
         // 0x81: AV1 with HDR capabilities
         // 0x91: VP9 with extended color config
-        if (data[1] === 0x22) return MP4ColorParser.parseHEVCConfig(reader)
-        if (data[1] === 0x64 || data[1] === 0x4d || data[1] === 0x42)
+        if (codecByte === 0x22) return MP4ColorParser.parseHEVCConfig(reader)
+        if (codecByte === 0x64 || codecByte === 0x4d || codecByte === 0x42)
           return MP4ColorParser.parseAVCConfig(reader)
-        if (data[1] === 0x81) return MP4ColorParser.parseAV1Config(reader)
-        if (data[1] === 0x91) return MP4ColorParser.parseVP9Config(reader)
+        if (codecByte === 0x81) return MP4ColorParser.parseAV1Config(reader)
+        if (codecByte === 0x91) return MP4ColorParser.parseVP9Config(reader)
       }
 
       const colourType = reader.readString(4)
-      console.debug('Color type:', colourType, 'Data length:', data.length)
-      console.debug(
-        'Raw data:',
-        Array.from(data).map((b) => b.toString(16))
-      )
 
       switch (colourType) {
         case 'nclx':
@@ -57,6 +50,7 @@ export class MP4ColorParser {
           const matrix = reader.readUint16()
           // For nclx, full range flag is in highest bit (0x80) of the flags byte
           const fullRange = colourType === 'nclx' ? (reader.readUint8() & 0x80) !== 0 : null
+
           return {
             matrixCoefficients: MP4ColorParser.mapMatrixCoefficients(matrix),
             transferCharacteristics: MP4ColorParser.mapTransferCharacteristics(transfer),
@@ -226,10 +220,10 @@ export class MP4ColorParser {
   }
 
   /**
-   * Parses AVC/H.264 codec configuration for HDR metadata.
-   * AVC signals HDR through:
-   * - Profile (High 10, High 10 Intra)
-   * - Profile compatibility flags
+   * Parses AVC/H.264 codec configuration for color information.
+   * Extracts color data from Sequence Parameter Set (SPS) NAL unit,
+   * specifically from the VUI (Video Usability Information) parameters.
+   * Follows ITU-T H.264 specification for bit-level parsing.
    *
    * @param reader - Binary reader positioned at start of AVC config
    * @returns VideoColorInfo Color space and HDR metadata
@@ -241,56 +235,209 @@ export class MP4ColorParser {
       const profileCompatibility = reader.readUint8()
       const levelIdc = reader.readUint8()
 
-      console.debug('AVC config:', {
+      // Length of SPS NAL units array
+      const lengthSizeMinusOne = reader.readUint8() & 0x03
+      const numOfSequenceParameterSets = reader.readUint8() & 0x1f
+      console.debug('AVC config details:', {
         configurationVersion,
         profileIdc,
-        profileCompatibility,
+        profileCompatibility: `0x${profileCompatibility.toString(16)}`,
         levelIdc,
+        lengthSizeMinusOne,
+        numOfSequenceParameterSets,
       })
 
-      // Check profiles
-      switch (profileIdc) {
-        // High 10, High 10 Intra
-        case 110:
-        case 122:
-          return {
-            matrixCoefficients: 'bt2020nc',
-            transferCharacteristics: 'bt2100-pq',
-            primaries: 'bt2020',
-            fullRange: true,
+      // Read SPS
+      if (numOfSequenceParameterSets > 0) {
+        const spsLength = reader.readUint16()
+        console.debug('SPS length:', spsLength)
+
+        if (spsLength > 4) {
+          // Must be at least 4 bytes for NAL header
+          const startOffset = reader.offset
+          const spsData = Array.from(reader.data.slice(startOffset, startOffset + spsLength))
+          console.debug('SPS data:', {
+            nalHeader: spsData.slice(0, 4).map((b) => `0x${b.toString(16)}`),
+            fullData: spsData.map((b) => `0x${b.toString(16)}`),
+            rawBytes: Array.from(spsData)
+              .map((b) => b.toString(2).padStart(8, '0'))
+              .join(' '),
+          })
+
+          // Skip NAL header (4 bytes)
+          reader.skip(4)
+
+          // Create a bit reader for the remaining SPS data
+          const spsReader = new BitReader(
+            reader.data.slice(reader.offset, reader.offset + spsLength - 4)
+          )
+
+          // seq_parameter_set_id
+          const spsId = spsReader.readUEV()
+          console.debug('SPS ID:', spsId)
+          spsReader.debugState()
+
+          if (
+            profileIdc === 100 ||
+            profileIdc === 110 ||
+            profileIdc === 122 ||
+            profileIdc === 244 ||
+            profileIdc === 44 ||
+            profileIdc === 83 ||
+            profileIdc === 86 ||
+            profileIdc === 118 ||
+            profileIdc === 128 ||
+            profileIdc === 138 ||
+            profileIdc === 139 ||
+            profileIdc === 134
+          ) {
+            const chromaFormatIdc = spsReader.readUEV()
+            console.debug('Chroma format:', chromaFormatIdc)
+            spsReader.debugState()
+
+            if (chromaFormatIdc === 3) {
+              spsReader.readBits(1) // separate_colour_plane_flag
+            }
+
+            const bitDepthLumaMinus8 = spsReader.readUEV()
+            const bitDepthChromaMinus8 = spsReader.readUEV()
+            console.debug('Bit depth:', {
+              luma: bitDepthLumaMinus8 + 8,
+              chroma: bitDepthChromaMinus8 + 8,
+            })
+
+            spsReader.readBits(1) // qpprime_y_zero_transform_bypass_flag
+
+            const seqScalingMatrixPresent = spsReader.readBits(1)
+            if (seqScalingMatrixPresent) {
+              const chromaFormatIdcValue = chromaFormatIdc === 3 ? 12 : 8
+              for (let i = 0; i < chromaFormatIdcValue; i++) {
+                const seqScalingListPresentFlag = spsReader.readBits(1)
+                if (seqScalingListPresentFlag) {
+                  if (i < 6) {
+                    spsReader.skipScalingList(16)
+                  } else {
+                    spsReader.skipScalingList(64)
+                  }
+                }
+              }
+            }
           }
 
-        // High, High Intra, High Progressive
-        case 100:
-        case 118:
-        case 44:
-          return {
-            matrixCoefficients: 'bt709',
-            transferCharacteristics: 'bt709',
-            primaries: 'bt709',
-            fullRange: false,
+          // Continue parsing until vui_parameters_present_flag
+          const log2MaxFrameNumMinus4 = spsReader.readUEV()
+          console.debug('log2_max_frame_num_minus4:', log2MaxFrameNumMinus4)
+
+          const picOrderCntType = spsReader.readUEV()
+          console.debug('Pic order count type:', picOrderCntType)
+          spsReader.debugState()
+
+          if (picOrderCntType === 0) {
+            const log2MaxPicOrderCntLsbMinus4 = spsReader.readUEV()
+            console.debug('log2_max_pic_order_cnt_lsb_minus4:', log2MaxPicOrderCntLsbMinus4)
+          } else if (picOrderCntType === 1) {
+            spsReader.readBits(1) // delta_pic_order_always_zero_flag
+            spsReader.readSEV() // offset_for_non_ref_pic
+            spsReader.readSEV() // offset_for_top_to_bottom_field
+            const numRefFramesInPicOrderCntCycle = spsReader.readUEV()
+            for (let i = 0; i < numRefFramesInPicOrderCntCycle; i++) {
+              spsReader.readSEV() // offset_for_ref_frame[i]
+            }
           }
 
-        // Main, Main Intra
-        // Baseline, Extended, Constrained Baseline
-        case 66:
-        case 77:
-        case 82:
-        case 88:
-          return {
-            matrixCoefficients: 'bt601',
-            transferCharacteristics: 'bt601',
-            primaries: 'bt601',
-            fullRange: false,
+          const maxNumRefFrames = spsReader.readUEV()
+          console.debug('max_num_ref_frames:', maxNumRefFrames)
+
+          spsReader.readBits(1) // gaps_in_frame_num_value_allowed_flag
+
+          const picWidthInMbsMinus1 = spsReader.readUEV()
+          const picHeightInMapUnitsMinus1 = spsReader.readUEV()
+          console.debug('Picture size in macroblocks:', {
+            width: picWidthInMbsMinus1 + 1,
+            height: picHeightInMapUnitsMinus1 + 1,
+          })
+
+          const frameMbsOnlyFlag = spsReader.readBits(1)
+          console.debug('frame_mbs_only_flag:', frameMbsOnlyFlag)
+
+          if (!frameMbsOnlyFlag) {
+            spsReader.readBits(1) // mb_adaptive_frame_field_flag
           }
 
-        default:
-          return MP4ColorParser.getDefaultColorInfo()
+          spsReader.readBits(1) // direct_8x8_inference_flag
+
+          const frameCroppingFlag = spsReader.readBits(1)
+          if (frameCroppingFlag) {
+            spsReader.readUEV() // frame_crop_left_offset
+            spsReader.readUEV() // frame_crop_right_offset
+            spsReader.readUEV() // frame_crop_top_offset
+            spsReader.readUEV() // frame_crop_bottom_offset
+          }
+
+          // Finally at VUI parameters
+          const vuiParametersPresentFlag = spsReader.readBits(1)
+          console.debug('VUI parameters present:', vuiParametersPresentFlag)
+          spsReader.debugState()
+
+          if (vuiParametersPresentFlag === 1) {
+            const aspectRatioInfoPresentFlag = spsReader.readBits(1)
+            if (aspectRatioInfoPresentFlag === 1) {
+              const aspectRatioIdc = spsReader.readBits(8)
+              if (aspectRatioIdc === 255) {
+                spsReader.readBits(16) // sar_width
+                spsReader.readBits(16) // sar_height
+              }
+            }
+
+            const overscanInfoPresentFlag = spsReader.readBits(1)
+            if (overscanInfoPresentFlag === 1) {
+              spsReader.readBits(1) // overscan_appropriate_flag
+            }
+
+            const videoSignalTypePresentFlag = spsReader.readBits(1)
+            console.debug('Video signal type present:', videoSignalTypePresentFlag)
+            spsReader.debugState()
+
+            if (videoSignalTypePresentFlag === 1) {
+              spsReader.readBits(3) // video_format
+              const fullRange = spsReader.readBits(1) === 1 // video_full_range_flag
+              const colourDescriptionPresentFlag = spsReader.readBits(1)
+              console.debug('Colour description present:', colourDescriptionPresentFlag)
+              spsReader.debugState()
+
+              if (colourDescriptionPresentFlag === 1) {
+                const colourPrimaries = spsReader.readBits(8)
+                const transferCharacteristics = spsReader.readBits(8)
+                const matrixCoefficients = spsReader.readBits(8)
+
+                console.debug('Found color info in VUI:', {
+                  colourPrimaries,
+                  transferCharacteristics,
+                  matrixCoefficients,
+                  fullRange,
+                })
+
+                return {
+                  matrixCoefficients: MP4ColorParser.mapMatrixCoefficients(matrixCoefficients),
+                  transferCharacteristics:
+                    MP4ColorParser.mapTransferCharacteristics(transferCharacteristics),
+                  primaries: MP4ColorParser.mapColorPrimaries(colourPrimaries),
+                  fullRange,
+                }
+              }
+            }
+          }
+
+          // Skip to end of SPS
+          reader.skip(spsLength - 4)
+        }
       }
+
+      return MP4ColorParser.getDefaultColorInfo()
     } catch (error) {
       console.debug('Error parsing AVC config:', error)
+      return MP4ColorParser.getDefaultColorInfo()
     }
-    return MP4ColorParser.getDefaultColorInfo()
   }
 
   /**
@@ -502,19 +649,17 @@ export class MP4ColorParser {
 
   /**
    * Maps color primaries values to standard strings.
-   * Values from ISO/IEC 23091-2:2021
+   * Values and mappings from ISO/IEC 23091-2:2021 section 8.1.
+   * These values indicate the chromaticity coordinates of the color primaries
+   * and white point used in the video content.
    *
    * @param value - Color primaries value from container
-   * @returns String identifier or null if unknown
+   * @returns String identifier or null if unknown/reserved
    */
   private static mapColorPrimaries(value: number): string | null {
     switch (value) {
-      case 0:
-        return null
       case 1:
         return 'bt709'
-      case 2:
-        return 'unspecified'
       case 4:
         return 'bt470m'
       case 5:
@@ -530,13 +675,9 @@ export class MP4ColorParser {
       case 10:
         return 'smpte428'
       case 11:
-        return 'smpte431'
+        return 'p3'
       case 12:
-        return 'smpte432'
-      case 22:
-        return 'jedec-p22'
-      case 23:
-        return 'ebu3213'
+        return 'p3-d65'
       default:
         return null
     }
@@ -544,19 +685,17 @@ export class MP4ColorParser {
 
   /**
    * Maps matrix coefficients values to standard strings.
-   * Values from ISO/IEC 23091-2:2021
+   * Values and mappings from ISO/IEC 23091-2:2021 section 8.3.
+   * These values define how RGB values are converted to YCbCr,
+   * which affects color reproduction and conversion.
    *
    * @param value - Matrix coefficients value from container
-   * @returns String identifier or null if unknown
+   * @returns String identifier or null if unknown/reserved
    */
   private static mapMatrixCoefficients(value: number): string | null {
     switch (value) {
-      case 0:
-        return 'rgb'
       case 1:
         return 'bt709'
-      case 2:
-        return 'unspecified'
       case 4:
         return 'fcc'
       case 5:
@@ -574,13 +713,11 @@ export class MP4ColorParser {
       case 11:
         return 'smpte2085'
       case 12:
-        return 'chroma-derived-nc'
+        return 'chromat-ncl'
       case 13:
-        return 'chroma-derived-c'
+        return 'chromat-cl'
       case 14:
         return 'ictcp'
-      case 15:
-        return 'y-derived'
       default:
         return null
     }
@@ -588,17 +725,17 @@ export class MP4ColorParser {
 
   /**
    * Maps transfer characteristics values to standard strings.
-   * Values from ISO/IEC 23091-2:2021
+   * Values and mappings from ISO/IEC 23091-2:2021 section 8.2.
+   * These values define the electro-optical transfer function (EOTF)
+   * used to convert signal values to display light output.
    *
    * @param value - Transfer characteristics value from container
-   * @returns String identifier or null if unknown
+   * @returns String identifier or null if unknown/reserved
    */
   private static mapTransferCharacteristics(value: number): string | null {
     switch (value) {
       case 1:
         return 'bt709'
-      case 2:
-        return 'unspecified'
       case 4:
         return 'gamma22'
       case 5:
@@ -612,11 +749,9 @@ export class MP4ColorParser {
       case 9:
         return 'log'
       case 10:
-        return 'log_sqrt'
+        return 'log-sqrt'
       case 11:
         return 'iec61966-2-4'
-      case 12:
-        return 'bt1361'
       case 13:
         return 'iec61966-2-1'
       case 14:
@@ -628,9 +763,7 @@ export class MP4ColorParser {
       case 17:
         return 'smpte428'
       case 18:
-        return 'arib-std-b67'
-      case 19:
-        return 'bt2100-hlg'
+        return 'hlg'
       default:
         return null
     }
@@ -667,7 +800,7 @@ export class MP4ColorParser {
       // Max/min luminance in 0.0001 nits
       // 1000000 = 100 nits (typical HDR threshold)
       const maxLuminance = reader.readUint32()
-      const minLuminance = reader.readUint32()
+      // const minLuminance = reader.readUint32()
 
       // If max luminance > 1000 nits (10000000 in 0.0001 nits), likely HDR
       const isHDR = maxLuminance > 1000000 // Value in 0.0001 nits
@@ -698,10 +831,10 @@ export class MP4ColorParser {
   private static parseDolbyVision(reader: BinaryReaderImpl): VideoColorInfo {
     try {
       const dvProfile = reader.readUint8()
-      const dvLevel = reader.readUint8()
-      const rpuFlag = reader.readUint8()
-      const elFlag = reader.readUint8()
-      const blFlag = reader.readUint8()
+      // const dvLevel = reader.readUint8()
+      // const rpuFlag = reader.readUint8()
+      // const elFlag = reader.readUint8()
+      // const blFlag = reader.readUint8()
 
       // Dolby Vision always uses HDR
       return {
@@ -714,5 +847,170 @@ export class MP4ColorParser {
       console.debug('Error parsing Dolby Vision config:', error)
     }
     return MP4ColorParser.getDefaultColorInfo()
+  }
+}
+
+/**
+ * Bit-level reader for parsing H.264 NAL units.
+ * Implements Exp-Golomb (UEV/SEV) decoding as per H.264 spec.
+ * Uses DataView and 32-bit buffer for efficient bit operations.
+ */
+class BitReader {
+  private view: DataView
+  private byteOffset = 0
+  //private bitOffset = 0
+  private bitBuffer = 0
+  private bitsInBuffer = 0
+  private readonly length: number
+
+  constructor(data: Uint8Array) {
+    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    this.length = data.length
+    this.fillBitBuffer()
+  }
+
+  /**
+   * Fills the internal 32-bit buffer with next available bytes.
+   * This reduces the number of individual byte reads needed.
+   */
+  private fillBitBuffer(): void {
+    while (this.bitsInBuffer <= 24 && this.byteOffset < this.length) {
+      this.bitBuffer = (this.bitBuffer << 8) | this.view.getUint8(this.byteOffset++)
+      this.bitsInBuffer += 8
+    }
+  }
+
+  /**
+   * Reads specified number of bits from the stream.
+   * Uses the internal 32-bit buffer for faster access.
+   *
+   * @param count - Number of bits to read (max 32)
+   * @returns Bit value as number
+   */
+  readBits(count: number): number {
+    if (count === 0) return 0
+    if (count > 32) {
+      console.debug('Attempting to read more than 32 bits')
+      return 0
+    }
+
+    // Ensure we have enough bits
+    if (this.bitsInBuffer < count) {
+      this.fillBitBuffer()
+      if (this.bitsInBuffer < count) {
+        console.debug('End of buffer reached while reading bits')
+        return 0
+      }
+    }
+
+    // Extract bits from the buffer
+    const value = (this.bitBuffer >> (this.bitsInBuffer - count)) & ((1 << count) - 1)
+    this.bitsInBuffer -= count
+    return value
+  }
+
+  /**
+   * Reads a single bit from the stream.
+   * Optimized special case of readBits(1).
+   *
+   * @returns Bit value (0 or 1)
+   */
+  readBit(): number {
+    if (this.bitsInBuffer === 0) {
+      this.fillBitBuffer()
+      if (this.bitsInBuffer === 0) {
+        console.debug('End of buffer reached while reading bit')
+        return 0
+      }
+    }
+
+    const bit = (this.bitBuffer >> (this.bitsInBuffer - 1)) & 1
+    this.bitsInBuffer--
+    return bit
+  }
+
+  /**
+   * Reads an unsigned Exp-Golomb code (UEV).
+   * Optimized to use readBits for the suffix.
+   *
+   * @returns Decoded UEV value
+   */
+  readUEV(): number {
+    let leadingZeroBits = -1
+    let bit = 0
+    do {
+      bit = this.readBit()
+      leadingZeroBits++
+    } while (bit === 0 && leadingZeroBits < 32)
+
+    if (leadingZeroBits >= 32) {
+      console.debug('Invalid UEV code - too many leading zeros')
+      return 0
+    }
+
+    const suffixBits = this.readBits(leadingZeroBits)
+    return (1 << leadingZeroBits) + suffixBits - 1
+  }
+
+  /**
+   * Reads a signed Exp-Golomb code (SEV).
+   * Uses UEV encoding with sign bit in LSB.
+   *
+   * @returns Decoded SEV value
+   */
+  readSEV(): number {
+    const codeNum = this.readUEV()
+    if (codeNum === 0) return 0
+    const signFlag = codeNum & 1
+    const magnitude = (codeNum + 1) >> 1
+    return signFlag ? magnitude : -magnitude
+  }
+
+  /**
+   * Skips scaling list data in SPS.
+   * Used for custom quantization matrices.
+   *
+   * @param size - Size of scaling list (16 or 64)
+   */
+  skipScalingList(size: number): void {
+    let lastScale = 8
+    let nextScale = 8
+    for (let j = 0; j < size; j++) {
+      if (nextScale !== 0) {
+        const deltaScale = this.readSEV()
+        nextScale = (lastScale + deltaScale + 256) % 256
+      }
+      lastScale = nextScale === 0 ? lastScale : nextScale
+    }
+  }
+
+  /**
+   * Outputs debug information about reader state.
+   * Includes byte/bit offsets and buffer contents.
+   */
+  debugState(): void {
+    const nextBytes = new Array(4)
+    for (let i = 0; i < 4 && this.byteOffset + i < this.length; i++) {
+      nextBytes[i] = `0x${this.view.getUint8(this.byteOffset + i).toString(16)}`
+    }
+
+    console.debug('BitReader state:', {
+      byteOffset: this.byteOffset,
+      bitsInBuffer: this.bitsInBuffer,
+      bitBuffer: `0x${this.bitBuffer.toString(16)}`,
+      nextBytes,
+      binaryView: nextBytes
+        .map((hex) => Number.parseInt(hex.slice(2), 16).toString(2).padStart(8, '0'))
+        .join(' '),
+    })
+  }
+
+  /**
+   * Checks if more data is available in the stream.
+   *
+   * @returns true if more data available, false otherwise
+   */
+  hasMoreData(): boolean {
+    return this.bitsInBuffer > 0 || this.byteOffset < this.length
   }
 }
