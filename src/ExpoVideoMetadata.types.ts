@@ -145,6 +145,7 @@ export interface ParsedVideoMetadata extends VideoTrackMetadata {
   audioChannels: number
   audioSampleRate: number
   audioCodec: string
+  audioBitrate?: number
   duration: number
   fileSize: number
   bitrate?: number
