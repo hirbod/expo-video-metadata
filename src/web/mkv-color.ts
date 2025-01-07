@@ -5,6 +5,37 @@ import type { VideoColorInfo } from '../ExpoVideoMetadata.types'
  * Handles color metadata parsing for WebM and Matroska container formats.
  */
 export class MkvColorParser {
+  // Static cache for hex string formatting
+  private static readonly byteToHex = Array.from({ length: 256 }, (_, i) =>
+    i.toString(16).padStart(2, '0')
+  )
+
+  // Static buffer for color element scanning
+  private static readonly COLOR_BUFFER = new Uint8Array(4)
+
+  // Cache default color info
+  private static readonly DEFAULT_COLOR_INFO: VideoColorInfo = {
+    primaries: null,
+    transferCharacteristics: null,
+    matrixCoefficients: null,
+    fullRange: null,
+  }
+
+  // Cache H.264 default color info
+  private static readonly H264_COLOR_INFO: VideoColorInfo = {
+    primaries: 'smpte170m',
+    transferCharacteristics: 'bt709',
+    matrixCoefficients: 'smpte170m',
+    fullRange: false,
+  }
+
+  /**
+   * Returns default color info object.
+   */
+  static getDefaultColorInfo(): VideoColorInfo {
+    return { ...MkvColorParser.DEFAULT_COLOR_INFO }
+  }
+
   /**
    * Parses WebM/MKV color information including HDR metadata.
    * Color information in WebM/MKV is stored hierarchically:
@@ -24,25 +55,18 @@ export class MkvColorParser {
   static parseColorInfo(data: Uint8Array, codec = ''): VideoColorInfo {
     try {
       console.debug('Color info parsing:', {
-        data: Array.from(data)
-          .map((b, i) => ({
-            offset: i,
-            hex: b.toString(16).padStart(2, '0'),
-            decimal: b,
-            ascii: b >= 32 && b <= 126 ? String.fromCharCode(b) : '.',
-            possibleElement: b === 0x55 ? 'Color element start' : '',
-          }))
-          .filter((_, i) => i < 32), // Only show first 32 bytes to avoid noise
+        data: Array.from(data.slice(0, 32)).map((b, i) => ({
+          offset: i,
+          hex: MkvColorParser.byteToHex[b],
+          decimal: b,
+          ascii: b >= 32 && b <= 126 ? String.fromCharCode(b) : '.',
+          possibleElement: b === 0x55 ? 'Color element start' : '',
+        })),
       })
 
       // For H.264 in MKV/WebM, if no color info is present, use standard values
       if (codec === 'V_MPEG4/ISO/AVC') {
-        return {
-          primaries: 'smpte170m',
-          transferCharacteristics: 'bt709',
-          matrixCoefficients: 'smpte170m',
-          fullRange: false,
-        }
+        return { ...MkvColorParser.H264_COLOR_INFO }
       }
 
       // For VFW content, return null values as we can't make assumptions
@@ -56,7 +80,8 @@ export class MkvColorParser {
       let range: number | null = null
 
       // Direct scan for color elements
-      for (let i = 0; i < data.length - 3; i++) {
+      const dataLength = data.length - 3
+      for (let i = 0; i < dataLength; i++) {
         // Check for element IDs starting with 0x55
         if (data[i] !== 0x55) continue
 
@@ -68,12 +93,18 @@ export class MkvColorParser {
 
         const value = data[i + 3]
 
+        // Copy to buffer for debug logging
+        MkvColorParser.COLOR_BUFFER[0] = data[i]
+        MkvColorParser.COLOR_BUFFER[1] = nextByte
+        MkvColorParser.COLOR_BUFFER[2] = sizeMarker
+        MkvColorParser.COLOR_BUFFER[3] = value
+
         console.debug('Found color element:', {
           offset: i,
-          id: '0x55' + nextByte.toString(16),
+          id: '0x55' + MkvColorParser.byteToHex[nextByte],
           value,
-          bytes: Array.from(data.slice(i, i + 4))
-            .map((b) => b.toString(16).padStart(2, '0'))
+          bytes: Array.from(MkvColorParser.COLOR_BUFFER)
+            .map((b) => MkvColorParser.byteToHex[b])
             .join(' '),
         })
 
@@ -272,19 +303,6 @@ export class MkvColorParser {
         return 'ebu3213'
       default:
         return null
-    }
-  }
-
-  /**
-   * Returns default color information structure.
-   * @returns VideoColorInfo Default color info with null values
-   */
-  static getDefaultColorInfo(): VideoColorInfo {
-    return {
-      matrixCoefficients: null,
-      transferCharacteristics: null,
-      primaries: null,
-      fullRange: null,
     }
   }
 }
