@@ -1,5 +1,6 @@
 // video-container-parser.ts
 import type { ParsedVideoMetadata, VideoContainer } from '../ExpoVideoMetadata.types'
+import { AVIParser } from './avi-parser'
 import { MOVParser } from './mov-parser'
 import { MP4Parser } from './mp4-parser'
 import { TSParser } from './ts-parser'
@@ -46,7 +47,7 @@ export class VideoContainerParser {
     const container = VideoContainerParser.detectContainer(headerBytes)
 
     // If we don't support this container type, fail fast before reading the whole file
-    if (container === 'unknown' || container === 'avi') {
+    if (container === 'unknown') {
       throw new Error('Unsupported container format')
     }
 
@@ -65,6 +66,8 @@ export class VideoContainerParser {
           return await new WebMParser(bytes).parse()
         case 'ts':
           return await new TSParser(bytes).parse()
+        case 'avi':
+          return await new AVIParser(bytes).parse()
         default:
           throw new Error('Unsupported container format')
       }
