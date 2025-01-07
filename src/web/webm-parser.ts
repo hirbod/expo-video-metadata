@@ -23,6 +23,19 @@ import { MkvColorParser } from './mkv-color'
  */
 export class WebMParser {
   protected reader: BinaryReaderImpl
+  private static readonly textDecoder = new TextDecoder()
+
+  // Static buffers for common operations
+  private static readonly AUDIO_BUFFER = new ArrayBuffer(8)
+  private static readonly AUDIO_VIEW = new DataView(WebMParser.AUDIO_BUFFER)
+  private static readonly SINGLE_BYTE_BUFFER = new Uint8Array(1)
+
+  // Helper method for consistent hex string formatting
+  private static bytesToHexString(data: Uint8Array, maxBytes: number = data.length): string {
+    return Array.from(data.slice(0, maxBytes))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(' ')
+  }
 
   /**
    * EBML element IDs for WebM/MKV container format.
@@ -78,7 +91,7 @@ export class WebMParser {
     LuminanceMin: 0x55da,
     ColourBitDepth: 0x55b2,
     ColourChromaSubsampling: 0x55b5,
-  }
+  } as const
 
   /**
    * Creates a new WebM parser instance.
@@ -104,20 +117,16 @@ export class WebMParser {
     let container: VideoContainer = 'webm'
 
     if (docType?.data) {
-      const docTypeStr = new TextDecoder().decode(docType.data)
+      const docTypeStr = WebMParser.textDecoder.decode(docType.data)
       console.debug('EBML Header:', {
         docTypeElement: {
           id: docType.id.toString(16),
           size: docType.size,
           offset: docType.offset,
-          rawBytes: Array.from(docType.data)
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' '),
+          rawBytes: WebMParser.bytesToHexString(docType.data),
           decodedValue: docTypeStr,
         },
-        fullHeader: Array.from(ebml.data.slice(0, 20))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        fullHeader: WebMParser.bytesToHexString(ebml.data, 20),
       })
 
       // DocType can be 'webm' or 'matroska'
@@ -133,9 +142,7 @@ export class WebMParser {
       console.debug('No DocType found in EBML header:', {
         ebmlId: ebml.id.toString(16),
         ebmlSize: ebml.size,
-        headerBytes: Array.from(ebml.data.slice(0, 20))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        headerBytes: WebMParser.bytesToHexString(ebml.data, 20),
       })
     }
 
@@ -182,9 +189,7 @@ export class WebMParser {
             success = Number.isFinite(rawDuration) && rawDuration > 0
 
             console.debug('Float32 duration attempt:', {
-              rawBytes: Array.from(durationData)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
+              rawBytes: WebMParser.bytesToHexString(durationData),
               rawDuration,
               success,
             })
@@ -209,9 +214,7 @@ export class WebMParser {
             }
 
             console.debug('Float64 duration attempt:', {
-              rawBytes: Array.from(durationData)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
+              rawBytes: WebMParser.bytesToHexString(durationData),
               rawDuration: duration64,
               success,
             })
@@ -229,9 +232,7 @@ export class WebMParser {
             success = intValue > 0
 
             console.debug('Integer duration attempt:', {
-              rawBytes: Array.from(durationData)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
+              rawBytes: WebMParser.bytesToHexString(durationData),
               rawDuration: intValue,
               success,
             })
@@ -245,17 +246,13 @@ export class WebMParser {
             duration = (rawDuration * timescale) / 1_000_000_000
 
             console.debug('Duration calculation:', {
-              rawBytes: Array.from(durationData)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
+              rawBytes: WebMParser.bytesToHexString(durationData),
               rawDuration,
               timescale,
               duration,
               calculation: {
                 steps: [
-                  `Raw bytes: ${Array.from(durationData)
-                    .map((b) => b.toString(16).padStart(2, '0'))
-                    .join(' ')}`,
+                  `Raw bytes: ${WebMParser.bytesToHexString(durationData)}`,
                   `Raw duration: ${rawDuration}`,
                   `Timescale: ${timescale}`,
                   `Duration = ${rawDuration} * ${timescale} / 1_000_000_000 = ${duration} seconds`,
@@ -382,16 +379,14 @@ export class WebMParser {
             elementData = data.slice(elementOffset, elementOffset + elementSize)
           }
 
-          console.debug('Found matching element:', {
-            id: '0x' + targetId.toString(16),
+          console.debug('Element found:', {
+            id: targetId.toString(16),
             size: elementSize,
             offset: elementOffset,
-            raw: Array.from(data.slice(offset, offset + Math.min(headerSize + elementSize, 16)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
-            data: Array.from(elementData)
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            raw: WebMParser.bytesToHexString(
+              data.slice(offset, offset + Math.min(headerSize + elementSize, 16))
+            ),
+            data: WebMParser.bytesToHexString(elementData),
           })
 
           return {
@@ -484,10 +479,12 @@ export class WebMParser {
           // 0x12 = buttons
           // 0x20 = control
           if (subId === 0x83 || subId === 0x03) {
-            const type = trackReader.read(1)[0]
+            WebMParser.SINGLE_BYTE_BUFFER.fill(0)
+            const typeData = trackReader.read(1)
+            WebMParser.SINGLE_BYTE_BUFFER.set(typeData)
+            const type = WebMParser.SINGLE_BYTE_BUFFER[0]
             trackInfo.type = type
             if (type === 1) {
-              // Found video track (type = 1)
               return {
                 id,
                 size,
@@ -498,7 +495,7 @@ export class WebMParser {
           } else if (subId === 0x86) {
             // CodecID (0x86) - String identifying the codec
             const codecData = trackReader.read(subSize)
-            trackInfo.codec = new TextDecoder().decode(codecData)
+            trackInfo.codec = WebMParser.textDecoder.decode(codecData)
           } else if (subId === 0xe0 || subId === 0x60) {
             // Video element (0xe0 = long form, 0x60 = short form)
             // Contains video-specific metadata like dimensions
@@ -545,7 +542,7 @@ export class WebMParser {
     // Find codec first since we need it for color mapping
     const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     const codec = codecElement?.data
-      ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
+      ? this.mapCodecId(WebMParser.textDecoder.decode(codecElement.data))
       : ''
 
     // Find video-specific elements
@@ -554,9 +551,7 @@ export class WebMParser {
     if (videoElement?.data) {
       console.debug('Found Video element:', {
         length: videoElement.data.length,
-        hex: Array.from(videoElement.data)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        hex: WebMParser.bytesToHexString(videoElement.data),
       })
 
       // Try to find dimensions in Video element first
@@ -595,9 +590,7 @@ export class WebMParser {
       // Log the raw data we're scanning
       console.debug('Track data to scan:', {
         length: data.length,
-        sample: Array.from(data.slice(0, Math.min(64, data.length)))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        sample: WebMParser.bytesToHexString(data.slice(0, Math.min(64, data.length))),
       })
 
       // First scan forward for width
@@ -621,9 +614,7 @@ export class WebMParser {
             offset: i,
             size,
             value: width,
-            bytes: Array.from(data.slice(i, i + 2 + size))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            bytes: WebMParser.bytesToHexString(data.slice(i, i + 2 + size)),
           })
         }
       }
@@ -658,9 +649,7 @@ export class WebMParser {
                     offset: j,
                     size: forwardSize,
                     value: height,
-                    bytes: Array.from(data.slice(j, j + 2 + forwardSize))
-                      .map((b) => b.toString(16).padStart(2, '0'))
-                      .join(' '),
+                    bytes: WebMParser.bytesToHexString(data.slice(j, j + 2 + forwardSize)),
                   })
                   break
                 }
@@ -672,9 +661,7 @@ export class WebMParser {
             offset: i - 2,
             size,
             value: height,
-            bytes: Array.from(data.slice(i - 2, i + size))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            bytes: WebMParser.bytesToHexString(data.slice(i - 2, i + size)),
           })
           break
         }
@@ -683,9 +670,7 @@ export class WebMParser {
       console.debug('Dimension scan results:', {
         width,
         height,
-        lastBytes: Array.from(data.slice(Math.max(0, data.length - 8)))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        lastBytes: WebMParser.bytesToHexString(data.slice(Math.max(0, data.length - 8))),
       })
     }
 
@@ -715,21 +700,15 @@ export class WebMParser {
           fps = Math.round(nanosPerSecond / defaultDuration)
 
           console.debug('DefaultDuration found by scanning:', {
-            rawBytes: Array.from(durationData)
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            rawBytes: WebMParser.bytesToHexString(durationData),
             defaultDuration,
             nanosPerFrame: defaultDuration,
             calculatedFps: fps,
             calculation: {
               formula: `${nanosPerSecond} / ${defaultDuration}`,
               steps: [
-                `Raw bytes: ${Array.from(durationData)
-                  .map((b) => b.toString(16).padStart(2, '0'))
-                  .join(' ')}`,
-                `Value bytes: ${Array.from(durationData.slice(1))
-                  .map((b) => b.toString(16).padStart(2, '0'))
-                  .join(' ')}`,
+                `Raw bytes: ${WebMParser.bytesToHexString(durationData)}`,
+                `Value bytes: ${WebMParser.bytesToHexString(durationData.slice(1))}`,
                 `Duration = ${defaultDuration} ns/frame`,
                 `FPS = ${nanosPerSecond} / ${defaultDuration} = ${nanosPerSecond / defaultDuration} ≈ ${fps}`,
               ],
@@ -760,9 +739,7 @@ export class WebMParser {
         if (privateDataElement?.data) {
           console.debug('Found VP9 private data:', {
             length: privateDataElement.data.length,
-            hex: Array.from(privateDataElement.data)
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            hex: WebMParser.bytesToHexString(privateDataElement.data),
           })
           colorInfo = MkvColorParser.parseColorInfo(privateDataElement.data, codec)
         }
@@ -783,9 +760,7 @@ export class WebMParser {
     const maxAttempts = 10000 // Safety limit
 
     console.debug('Audio track search:', {
-      firstTrackBytes: Array.from(data.slice(0, 32))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join(' '),
+      firstTrackBytes: WebMParser.bytesToHexString(data.slice(0, 32)),
     })
 
     while (reader.remaining() > 0 && attempts < maxAttempts) {
@@ -806,9 +781,7 @@ export class WebMParser {
             id: '0x' + id.toString(16),
             size,
             type: trackType?.data ? trackType.data[0] : null,
-            data: Array.from(trackData.slice(0, Math.min(32, trackData.length)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' '),
+            data: WebMParser.bytesToHexString(trackData, 32),
           })
 
           if (trackType?.data && trackType.data[0] === 2) {
@@ -922,9 +895,7 @@ export class WebMParser {
             console.debug('Found channels by scanning:', {
               offset: i,
               value: channels,
-              bytes: Array.from(data.slice(i, i + 3))
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' '),
+              bytes: WebMParser.bytesToHexString(data.slice(i, i + 3)),
             })
           }
         }
@@ -934,22 +905,18 @@ export class WebMParser {
         // Size marker has top bit set (0x80-0xFF)
         if (!sampleRate && currentByte === 0xb5 && (nextByte & 0x80) === 0x80) {
           const rateData = data.slice(i + 2, i + 10)
-          const view = new DataView(rateData.buffer, rateData.byteOffset)
+          // Use static DataView instead of creating new one
+          WebMParser.AUDIO_BUFFER.slice(0) // Clear buffer
+          const bytes = new Uint8Array(WebMParser.AUDIO_BUFFER)
+          bytes.set(rateData)
           try {
-            const rate = Math.round(view.getFloat64(0, false)) // false = big-endian
-            // Validate sample rate against common audio sample rates
-            // 8000 Hz = telephone quality
-            // 44100 Hz = CD quality
-            // 48000 Hz = DVD quality
-            // 96000-192000 Hz = HD audio
+            const rate = Math.round(WebMParser.AUDIO_VIEW.getFloat64(0, false))
             if (rate >= 8000 && rate <= 192000) {
               sampleRate = rate
               console.debug('Found sample rate by scanning:', {
                 offset: i,
                 value: sampleRate,
-                bytes: Array.from(rateData)
-                  .map((b) => b.toString(16).padStart(2, '0'))
-                  .join(' '),
+                bytes: WebMParser.bytesToHexString(rateData),
               })
             }
           } catch (error) {
@@ -965,7 +932,7 @@ export class WebMParser {
     // Find codec ID (0x86) to determine audio format
     const codecElement = this.findElement(data, WebMParser.ELEMENTS.CodecID)
     const codec = codecElement?.data
-      ? this.mapCodecId(new TextDecoder().decode(codecElement.data))
+      ? this.mapCodecId(WebMParser.textDecoder.decode(codecElement.data))
       : 'vorbis' // Default to Vorbis if not specified
 
     // Try to get more accurate metadata from codec private data (0x63A2)
@@ -1075,10 +1042,9 @@ export class WebMParser {
           offset,
           id: '0x' + id.toString(16),
           isSegment: id === WebMParser.ELEMENTS.Segment,
-          // Show next 16 bytes for debugging
-          nextBytes: Array.from(data.slice(offset, offset + Math.min(16, data.length - offset)))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' '),
+          nextBytes: WebMParser.bytesToHexString(
+            data.slice(offset, offset + Math.min(16, data.length - offset))
+          ),
         })
 
         if (id === WebMParser.ELEMENTS.Segment) {
@@ -1151,9 +1117,7 @@ export class WebMParser {
       console.debug('Parsing Vorbis private data:', {
         length: data.length,
         // Show first 32 bytes or less for debugging
-        firstBytes: Array.from(data.slice(0, Math.min(32, data.length)))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join(' '),
+        firstBytes: WebMParser.bytesToHexString(data.slice(0, Math.min(32, data.length))),
       })
 
       // Xiph lacing format structure:
