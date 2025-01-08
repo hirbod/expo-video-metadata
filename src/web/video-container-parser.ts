@@ -26,7 +26,7 @@ export class VideoContainerParser {
     MKV: [0x1a, 0x45, 0xdf, 0xa3], // Same as WEBM, differentiated by DocType
     MOV: [0x6d, 0x6f, 0x6f, 0x76], // moov
     AVI: [0x52, 0x49, 0x46, 0x46], // RIFF
-    TS: [0x47, 0x40, 0x00], // TS sync byte pattern
+    TS: [0x47], // TS sync byte
   }
 
   /**
@@ -41,8 +41,10 @@ export class VideoContainerParser {
    * by their DocType in the EBML header. The WebM parser handles both.
    */
   static async parseContainer(file: File | Blob): Promise<ParsedVideoMetadata> {
-    // Read first 32 bytes for signature detection
-    const headerBuffer = await file.slice(0, 32).arrayBuffer()
+    // For TS files we need at least 188 * 3 bytes to check multiple sync packets
+    // For other formats 32 bytes is enough
+    const headerSize = 188 * 3
+    const headerBuffer = await file.slice(0, headerSize).arrayBuffer()
     const headerBytes = new Uint8Array(headerBuffer)
     const container = VideoContainerParser.detectContainer(headerBytes)
 
@@ -56,6 +58,7 @@ export class VideoContainerParser {
     const bytes = new Uint8Array(buffer)
 
     try {
+      console.debug('Parsing container:', container)
       switch (container) {
         case 'mp4':
           return await new MP4Parser(bytes).parse()
@@ -83,6 +86,7 @@ export class VideoContainerParser {
   private static detectContainer(bytes: Uint8Array): VideoContainer {
     // Check for TS first as it has a different pattern
     if (VideoContainerParser.isTransportStream(bytes)) {
+      console.debug('Detected TS container')
       return 'ts'
     }
 
@@ -93,7 +97,7 @@ export class VideoContainerParser {
       // QuickTime specific atoms that indicate a MOV file
       // 'qt  ' and 'QT  ' use spaces (0x20) as padding
       if (['mvhd', 'moov', 'qt  '].includes(atomType)) {
-        console.error('Found QuickTime atom:', atomType)
+        console.debug('Found QuickTime atom:', atomType)
         return 'mov'
       }
 
@@ -143,8 +147,36 @@ export class VideoContainerParser {
    * Check if file is a Transport Stream
    */
   private static isTransportStream(bytes: Uint8Array): boolean {
-    // Check for TS sync byte pattern
-    return bytes[0] === 0x47 && bytes[188] === 0x47 && bytes[376] === 0x47
+    // Check for TS sync byte (0x47) at regular 188-byte intervals
+    // Check first few packets to increase confidence
+    const packetSize = 188
+
+    // First check if we have enough data
+    if (bytes.length < packetSize) {
+      console.debug('Not enough data for TS detection, length:', bytes.length)
+      return false
+    }
+
+    // Log first few bytes for debugging
+    console.debug(
+      'First bytes:',
+      Array.from(bytes.slice(0, 5)).map((b) => '0x' + b.toString(16))
+    )
+
+    for (let i = 0; i < 5; i++) {
+      const offset = i * packetSize
+      if (offset >= bytes.length) {
+        console.debug('Reached end of buffer at offset:', offset)
+        break
+      }
+      const syncByte = bytes[offset]
+      console.debug(`Checking sync byte at offset ${offset}:`, '0x' + syncByte.toString(16))
+      if (syncByte !== 0x47) {
+        console.debug('Invalid sync byte at offset:', offset)
+        return false
+      }
+    }
+    return true
   }
 
   /**
