@@ -1404,6 +1404,21 @@ export class TSParser {
             remainingBits: reader.remainingBits(),
           })
 
+          // Calculate FPS from timeScale and numUnitsInTick
+          if (numUnitsInTick > 0 && timeScale > 0) {
+            // For H.264, we need to divide by 2 to get the actual frame rate
+            fps = timeScale / (2 * numUnitsInTick)
+
+            // Common cases for exact values
+            if (timeScale === 60000 && numUnitsInTick === 1001) {
+              fps = 29.97 // (60000/1001)/2
+            } else if (timeScale === 50000 && numUnitsInTick === 1001) {
+              fps = 24.98 // (50000/1001)/2
+            } else if (timeScale === 48000 && numUnitsInTick === 1001) {
+              fps = 23.98 // (48000/1001)/2
+            }
+          }
+
           // For H.264 streams, common time_scale values indicate specific frame rates
           if (timeScale === 16777216) {
             // 2^24
