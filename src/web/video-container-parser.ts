@@ -3,7 +3,7 @@ import type { ParsedVideoMetadata, VideoContainer } from '../ExpoVideoMetadata.t
 import { AVIParser } from './avi-parser'
 import { MOVParser } from './mov-parser'
 import { MP4Parser } from './mp4-parser'
-import { TSParser } from './ts-parser'
+import { TSParser } from './ts/ts-parser'
 import { WebMParser } from './webm-parser'
 
 /**
