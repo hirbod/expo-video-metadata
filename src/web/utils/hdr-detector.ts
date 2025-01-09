@@ -1,5 +1,5 @@
 // hdr-detector.ts
-import type { VideoColorInfo } from '../ExpoVideoMetadata.types'
+import type { VideoColorInfo } from '../../ExpoVideoMetadata.types'
 
 /**
  * Class responsible for detecting HDR (High Dynamic Range)

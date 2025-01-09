@@ -1,4 +1,4 @@
-import type { BinaryReaderImpl } from '../binary-reader'
+import type { BinaryReaderImpl } from '../../binary-reader'
 
 /**
  * Information about an audio stream including codec, sample rate, channels, and bitrate

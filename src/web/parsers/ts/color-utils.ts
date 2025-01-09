@@ -1,4 +1,4 @@
-import type { VideoColorInfo } from '../../ExpoVideoMetadata.types'
+import type { VideoColorInfo } from '../../../ExpoVideoMetadata.types'
 
 /**
  * Returns default color information with all fields set to null.

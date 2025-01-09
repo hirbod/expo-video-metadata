@@ -1,8 +1,12 @@
 // mov-parser.ts
-import type { MP4Box, ParsedVideoMetadata, VideoTrackMetadata } from '../ExpoVideoMetadata.types'
-import { BinaryReaderImpl } from './binary-reader'
-import { MP4ColorParser } from './mp4-color'
-import { MP4Parser } from './mp4-parser'
+import type {
+  MP4Box,
+  ParsedVideoMetadata,
+  VideoTrackMetadata,
+} from '../../../ExpoVideoMetadata.types'
+import { BinaryReaderImpl } from '../../binary-reader'
+import { MP4ColorParser } from '../mp4/mp4-color'
+import { MP4Parser } from '../mp4/mp4-parser'
 
 /**
  * Parser for QuickTime MOV container format.

@@ -10,10 +10,10 @@ import type {
   VideoColorInfo,
   VideoContainer,
   WebMElement,
-} from '../ExpoVideoMetadata.types'
+} from '../../ExpoVideoMetadata.types'
 // WebM parser with full support for video/audio codecs and metadata parsing
-import { BinaryReaderImpl } from './binary-reader'
-import { MkvColorParser } from './mkv-color'
+import { BinaryReaderImpl } from '../binary-reader'
+import { MkvColorParser } from './webm-mkv-color'
 
 /**
  * Parser for WebM/MKV container formats using EBML structure.

@@ -1,5 +1,5 @@
-import type { VideoTrackMetadata } from '../../ExpoVideoMetadata.types'
-import type { BinaryReaderImpl } from '../binary-reader'
+import type { VideoTrackMetadata } from '../../../ExpoVideoMetadata.types'
+import type { BinaryReaderImpl } from '../../binary-reader'
 import { getDefaultColorInfo } from './color-utils'
 import { parseH264SPS } from './h264-parser'
 import { parseHEVCSPS } from './hevc-parser'

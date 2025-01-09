@@ -2,9 +2,9 @@ import type {
   ParsedVideoMetadata,
   VideoColorInfo,
   VideoTrackMetadata,
-} from '../ExpoVideoMetadata.types'
+} from '../../../ExpoVideoMetadata.types'
 // avi-parser.ts
-import { BinaryReaderImpl } from './binary-reader'
+import { BinaryReaderImpl } from '../../binary-reader'
 
 /**
  * Parser for AVI (Audio Video Interleave) container format.

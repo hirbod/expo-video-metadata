@@ -1,6 +1,6 @@
 // ts-parser.ts
-import type { ParsedVideoMetadata, VideoTrackMetadata } from '../../ExpoVideoMetadata.types'
-import { BinaryReaderImpl } from '../binary-reader'
+import type { ParsedVideoMetadata, VideoTrackMetadata } from '../../../ExpoVideoMetadata.types'
+import { BinaryReaderImpl } from '../../binary-reader'
 import { AUDIO_STREAM_TYPES, parseAudioStream, type AudioStreamType } from './audio-parser'
 import { getDefaultColorInfo } from './color-utils'
 import {

@@ -1,6 +1,6 @@
 import type { VideoInfoOptions, VideoInfoResult, VideoSource } from './ExpoVideoMetadata.types'
-import { HdrDetector } from './web/hdr-detector'
 import { getQuickFileSize } from './web/utils/file-utils'
+import { HdrDetector } from './web/utils/hdr-detector'
 import { VideoContainerParser } from './web/video-container-parser'
 
 export default {

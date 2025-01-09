@@ -1,4 +1,4 @@
-import type { VideoTrackMetadata } from '../../ExpoVideoMetadata.types'
+import type { VideoTrackMetadata } from '../../../ExpoVideoMetadata.types'
 import { getDefaultColorInfo } from './color-utils'
 
 /**

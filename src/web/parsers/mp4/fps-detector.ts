@@ -1,6 +1,6 @@
 // fps-detector.ts
-import type { SampleEntry, TimingInfo } from '../ExpoVideoMetadata.types'
-import { BinaryReaderImpl } from './binary-reader'
+import type { SampleEntry, TimingInfo } from '../../../ExpoVideoMetadata.types'
+import { BinaryReaderImpl } from '../../binary-reader'
 
 /**
  * Utility class for detecting frame rates from video container timing data.
@@ -80,6 +80,7 @@ export class FpsDetector {
       const averageDuration = totalDuration / totalSamples
       const calculatedFps = timescale / averageDuration
 
+      /*
       console.debug('FPS Detection: Direct calculation', {
         totalSamples,
         timescale,
@@ -87,6 +88,7 @@ export class FpsDetector {
         calculatedFps,
         firstThreeSamples,
       })
+      */
 
       // Return minimal data needed for FPS calculation
       return {

@@ -1,5 +1,5 @@
-import type { VideoTrackMetadata } from '../../ExpoVideoMetadata.types'
-import { BitReader } from '../bit-reader'
+import type { VideoTrackMetadata } from '../../../ExpoVideoMetadata.types'
+import { BitReader } from '../../bit-reader'
 import { getDefaultColorInfo } from './color-utils'
 
 /**

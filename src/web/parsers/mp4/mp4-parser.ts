@@ -3,9 +3,9 @@ import type {
   ParsedVideoMetadata,
   VideoColorInfo,
   VideoTrackMetadata,
-} from '../ExpoVideoMetadata.types'
+} from '../../../ExpoVideoMetadata.types'
 
-import { BinaryReaderImpl } from './binary-reader'
+import { BinaryReaderImpl } from '../../binary-reader'
 import { FpsDetector } from './fps-detector'
 import { MP4ColorParser } from './mp4-color'
 
@@ -344,10 +344,12 @@ export class MP4Parser {
       offset += boxSize
     }
 
+    /*
     console.debug(
       'Found boxes:',
       boxes.map((b) => ({ type: b.type, size: b.size }))
     )
+    */
     return boxes
   }
 
@@ -415,10 +417,12 @@ export class MP4Parser {
    * @returns Promise<MP4Box | undefined> The video track box if found
    */
   protected async findVideoTrack(moovBoxes: MP4Box[]): Promise<MP4Box | undefined> {
+    /*
     console.debug(
       'Looking for video track in moov boxes:',
       moovBoxes.map((b) => ({ type: b.type, size: b.size }))
     )
+    */
 
     // Get all track boxes
     const tracks = moovBoxes.filter((box) => box.type === 'trak')
@@ -446,7 +450,7 @@ export class MP4Parser {
       const handlerOffset = hdlrOffset + 16
       if (mdiaData.length < handlerOffset + 4) continue
 
-      const handlerType = new TextDecoder().decode(
+      const handlerType = MP4Parser.textDecoder.decode(
         mdiaData.subarray(handlerOffset, handlerOffset + 4)
       )
       console.debug('Found track type:', handlerType)
@@ -538,11 +542,13 @@ export class MP4Parser {
       matrix.push(reader.readUint32())
     }
 
+    /*
     console.debug('Transformation matrix:', {
       matrix,
       hex: matrix.map((n) => '0x' + n.toString(16)),
       normalized: matrix.map((n) => n / 0x10000), // Convert from 16.16 fixed-point
     })
+    */
 
     // Calculate scale factors from matrix (in 16.16 fixed-point)
     const scaleX = Math.sqrt(matrix[0] * matrix[0] + matrix[3] * matrix[3]) / 0x10000
@@ -577,10 +583,6 @@ export class MP4Parser {
     if (!stsd) throw new Error('No stsd box found')
 
     const stsdBoxes = await this.parseBoxes(stsd.data!)
-    console.debug(
-      'STSD box content:',
-      stsdBoxes.map((b) => ({ type: b.type, size: b.size }))
-    )
 
     const videoTrack = this.findVideoBox(stsdBoxes)
 
@@ -592,12 +594,6 @@ export class MP4Parser {
         // Skip version and entry count (8 bytes)
         const stsdReader = new BinaryReaderImpl(stsd.data)
         stsdReader.skip(8)
-
-        // Log the first 100 bytes for debugging
-        console.debug(
-          'STSD box data (first 100 bytes):',
-          Array.from(stsdReader.data.slice(0, 100)).map((b) => '0x' + b.toString(16))
-        )
 
         // In an AVC1 box:
         // - First 8 bytes: size + type ('avc1')
@@ -613,6 +609,7 @@ export class MP4Parser {
         const codedWidth = (stsdReader.data[widthOffset] << 8) | stsdReader.data[widthOffset + 1]
         const codedHeight = (stsdReader.data[heightOffset] << 8) | stsdReader.data[heightOffset + 1]
 
+        /*
         console.debug('Raw dimension bytes:', {
           width: [
             '0x' + stsdReader.data[widthOffset].toString(16),
@@ -623,6 +620,7 @@ export class MP4Parser {
             '0x' + stsdReader.data[heightOffset + 1].toString(16),
           ],
         })
+        */
 
         if (codedWidth > 0 && codedHeight > 0 && codedWidth < 10000 && codedHeight < 10000) {
           // These are the actual dimensions the video is encoded at
@@ -713,6 +711,7 @@ export class MP4Parser {
       const av1C = this.findBox(videoBoxes, 'av1C')
       const avcC = this.findBox(videoBoxes, 'avcC')
 
+      /*
       console.debug('Color info boxes found:', {
         hasColr: !!colr,
         hasMdcv: !!mdcv,
@@ -721,6 +720,7 @@ export class MP4Parser {
         hasHdr10Static: !!st2086,
         hasCodecConfig: !!(hvcC || vpcC || av1C || avcC),
       })
+      */
 
       // Try to get color info from boxes in priority order
       if (colr?.data) {
@@ -824,10 +824,12 @@ export class MP4Parser {
    * @returns Promise<MP4Box | undefined> The audio track box if found
    */
   protected async findAudioTrack(moovBoxes: MP4Box[]): Promise<MP4Box | undefined> {
+    /*
     console.debug(
       'Looking for audio track in moov boxes:',
       moovBoxes.map((b) => ({ type: b.type, size: b.size }))
     )
+    */
 
     for (const trak of moovBoxes.filter((box) => box.type === 'trak')) {
       const mdiaOffset = this.findBoxOffset(trak.data!, 'mdia')
@@ -842,7 +844,7 @@ export class MP4Parser {
       const handlerOffset = hdlrOffset + 16
       if (mdiaData.length < handlerOffset + 4) continue
 
-      const handlerType = new TextDecoder().decode(
+      const handlerType = MP4Parser.textDecoder.decode(
         mdiaData.subarray(handlerOffset, handlerOffset + 4)
       )
       console.debug('Found track handler type:', handlerType)
@@ -900,10 +902,12 @@ export class MP4Parser {
       if (!audioStsd) throw new Error('No stsd box found in hierarchy')
 
       const audioStsdBoxes = await this.parseBoxes(audioStsd.data!)
+      /*
       console.debug(
         'Audio STSD boxes:',
         audioStsdBoxes.map((b) => ({ type: b.type, size: b.size }))
       )
+      */
 
       const audioBox = this.findAudioBox(audioStsdBoxes)
       if (!audioBox || !audioBox.data) throw new Error('No audio format box found')

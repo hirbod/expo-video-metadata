@@ -1,4 +1,4 @@
-import type { BinaryReaderImpl } from '../binary-reader'
+import type { BinaryReaderImpl } from '../../binary-reader'
 
 /**
  * Program Specific Information (PSI) table identifiers.

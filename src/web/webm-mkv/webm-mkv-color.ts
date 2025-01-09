@@ -1,4 +1,4 @@
-import type { VideoColorInfo } from '../ExpoVideoMetadata.types'
+import type { VideoColorInfo } from '../../ExpoVideoMetadata.types'
 
 /**
  * Parser for WebM/MKV color information.

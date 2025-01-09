@@ -1,14 +1,16 @@
 // video-container-parser.ts
 import type { ParsedVideoMetadata, VideoContainer } from '../ExpoVideoMetadata.types'
-import { AVIParser } from './avi-parser'
-import { MOVParser } from './mov-parser'
-import { MP4Parser } from './mp4-parser'
-import { TSParser } from './ts/ts-parser'
-import { WebMParser } from './webm-parser'
+import { AVIParser } from './parsers/avi/avi-parser'
+import { MOVParser } from './parsers/mov/mov-parser'
+import { MP4Parser } from './parsers/mp4/mp4-parser'
+import { TSParser } from './parsers/ts/ts-parser'
+import { WebMParser } from './webm-mkv/webm-mkv-parser'
 
 /**
- * Main parser class that detects and handles different video container formats
- * Supports MP4, MOV, WebM, MKV, AVI, and TS containers
+ * VideoContainerParser is responsible for detecting and parsing different video container formats.
+ * It provides functionality to extract metadata from various video formats including MP4, MOV, WebM, MKV, AVI, and TS.
+ *
+ * @class
  */
 export class VideoContainerParser {
   /**
@@ -19,6 +21,10 @@ export class VideoContainerParser {
    * - MOV: 'moov' atom marker for QuickTime format
    * - AVI: 'RIFF' marker for Audio Video Interleave
    * - TS: Transport Stream sync byte (0x47) followed by specific bits
+   *
+   * @private
+   * @static
+   * @readonly
    */
   private static readonly SIGNATURES = {
     MP4: [0x66, 0x74, 0x79, 0x70], // ftyp
@@ -38,7 +44,13 @@ export class VideoContainerParser {
    * 4. Extract and return standardized metadata
    *
    * Note: WebM and MKV share the same signature but are differentiated
-   * by their DocType in the EBML header. The WebM parser handles both.
+   * by their DocType in the EBML header. The parser handles both.
+   *
+   * @static
+   * @async
+   * @param {File | Blob} file - The video file or blob to parse
+   * @returns {Promise<ParsedVideoMetadata>} A promise that resolves with the parsed video metadata
+   * @throws {Error} When the container format is unsupported or parsing fails
    */
   static async parseContainer(file: File | Blob): Promise<ParsedVideoMetadata> {
     // For TS files we need at least 188 * 3 bytes to check multiple sync packets
@@ -81,7 +93,12 @@ export class VideoContainerParser {
   }
 
   /**
-   * Detect container format from file signature
+   * Detect the container format from the file signature bytes.
+   *
+   * @private
+   * @static
+   * @param {Uint8Array} bytes - The bytes to analyze for container detection
+   * @returns {VideoContainer} The detected container format or 'unknown'
    */
   private static detectContainer(bytes: Uint8Array): VideoContainer {
     // Check for TS first as it has a different pattern
@@ -144,7 +161,13 @@ export class VideoContainerParser {
   }
 
   /**
-   * Check if file is a Transport Stream
+   * Check if the provided bytes represent a Transport Stream (TS) format.
+   * Verifies the presence of sync bytes (0x47) at regular 188-byte intervals.
+   *
+   * @private
+   * @static
+   * @param {Uint8Array} bytes - The bytes to check for TS format
+   * @returns {boolean} True if the bytes represent a TS format, false otherwise
    */
   private static isTransportStream(bytes: Uint8Array): boolean {
     // Check for TS sync byte (0x47) at regular 188-byte intervals
@@ -180,7 +203,13 @@ export class VideoContainerParser {
   }
 
   /**
-   * Check if EBML container is Matroska
+   * Check if an EBML container is specifically a Matroska format.
+   * Searches for the DocType element and verifies if it contains 'matroska'.
+   *
+   * @private
+   * @static
+   * @param {Uint8Array} bytes - The bytes to check for Matroska format
+   * @returns {boolean} True if the container is Matroska, false otherwise
    */
   private static isMatroska(bytes: Uint8Array): boolean {
     // Skip EBML header and look for DocType
@@ -197,14 +226,25 @@ export class VideoContainerParser {
   }
 
   /**
-   * Match signature pattern at offset
+   * Match a signature pattern at a specific offset in the bytes.
+   *
+   * @private
+   * @static
+   * @param {Uint8Array} bytes - The bytes to check
+   * @param {number} offset - The offset position to start checking
+   * @param {number[]} signature - The signature pattern to match
+   * @returns {boolean} True if the signature matches at the offset, false otherwise
    */
   private static matchSignature(bytes: Uint8Array, offset: number, signature: number[]): boolean {
     return signature.every((byte, i) => bytes[offset + i] === byte)
   }
 
   /**
-   * Utility method to check if format is supported
+   * Check if a given file format is supported based on its extension.
+   *
+   * @static
+   * @param {File} file - The file to check
+   * @returns {boolean} True if the file format is supported, false otherwise
    */
   static isFormatSupported(file: File): boolean {
     const extension = file.name.split('.').pop()?.toLowerCase()
@@ -212,16 +252,26 @@ export class VideoContainerParser {
   }
 
   /**
-   * Get metadata from file
+   * Extract metadata from a File object.
+   *
+   * @static
+   * @async
+   * @param {File} file - The video file to process
+   * @returns {Promise<ParsedVideoMetadata>} A promise that resolves with the parsed video metadata
    */
-  static async getMetadataFromFile(file: File) {
+  static async getMetadataFromFile(file: File): Promise<ParsedVideoMetadata> {
     return VideoContainerParser.parseContainer(file)
   }
 
   /**
-   * Get metadata from URL
+   * Extract metadata from a video URL.
+   *
+   * @static
+   * @async
+   * @param {string} url - The URL of the video to process
+   * @returns {Promise<ParsedVideoMetadata>} A promise that resolves with the parsed video metadata
    */
-  static async getMetadataFromUrl(url: string) {
+  static async getMetadataFromUrl(url: string): Promise<ParsedVideoMetadata> {
     const response = await fetch(url)
     const blob = await response.blob()
     return VideoContainerParser.parseContainer(blob)
