@@ -8,8 +8,8 @@ export type VideoInfoResult = {
    */
   hasAudio: boolean;
   /**
-   * Available only on iOS >= 14 and Android. Tells if the video is a HDR video.
-   * Will return null if it could not be determined. (e.g. on Web or on older iOS/Android versions)
+   * Tells if the video is HDR.
+   * Will return null if it could not be determined.
    */
   isHDR: boolean | null;
   /**
@@ -22,7 +22,7 @@ export type VideoInfoResult = {
   height: number;
   /**
    * Frame rate of the video in frames per second.
-   * Works on iOS, Android and Web (except Safari).
+   * Works when the container exposes enough packet timing information.
    */
   fps: number;
   /**
@@ -31,18 +31,17 @@ export type VideoInfoResult = {
    */
   bitRate: number;
   /**
-   * File size of the video in bytes. Works only for local files, returns 0 for remote files.
-   * Supported on all platforms.
+   * File size of the video in bytes.
+   * Remote files return 0 when the server does not expose a readable content length.
    */
   fileSize: number;
   /**
    * Video codec.
-   * Supported on all platforms, but on Web it may return an empty string.
+   * Returns an empty string when the codec cannot be determined.
    */
   codec: string;
   /**
    * Video orientation.
-   * Supported on all platforms, but on Web it may return an empty string.
    * Orientation takes into account both the natural dimensions AND any rotation/transform applied to the video:
    * - Portrait: The video is in portrait mode.
    * - PortraitUpsideDown: The video is in portrait mode, but upside down.
@@ -85,7 +84,7 @@ export type VideoInfoResult = {
   audioCodec: string;
   /**
    * Location where the video was recorded.
-   * Supported on iOS and Android (if the video contains location metadata)
+   * Returned when the video contains readable location metadata.
    */
   location: {
     latitude: number;
@@ -98,7 +97,7 @@ export type VideoSource = string | File | Blob;
 
 export type VideoInfoOptions = {
   /**
-   * In case `sourceFilename` is a remote URI, `headers` object is passed in a network request.
+   * In case `source` is a remote URI, `headers` object is passed in a network request.
    */
   headers?: Record<string, string>;
 };

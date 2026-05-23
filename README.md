@@ -1,6 +1,6 @@
 # expo-video-metadata
 
-Video metadata for Expo apps, with native support on iOS and Android and a real parser on web.
+Video metadata for Expo apps, powered by [Mediabunny](https://mediabunny.dev) on iOS, Android, and web.
 
 This package reads duration, dimensions, frame rate, codecs, audio track info, orientation, HDR, aspect ratio, file size, and location metadata when the file contains it.
 
@@ -14,7 +14,7 @@ It is currently maintained against **Expo SDK 56**.
 npx expo install expo-video-metadata
 ```
 
-This package contains native code. It works in development builds and production builds, not Expo Go.
+This package does not ship custom native code. It uses Mediabunny for parsing and `expo-file-system` for efficient local file reads on iOS and Android.
 
 For bare React Native apps, install and configure Expo modules first:
 
@@ -24,7 +24,9 @@ https://docs.expo.dev/bare/installing-expo-modules/
 
 ### iOS and Android
 
-iOS and Android use native platform metadata APIs. Local files work directly. Remote URLs are supported, and request headers can be passed through the `headers` option.
+iOS and Android use Mediabunny through a small `expo-file-system` source adapter. Local `file://` and `content://` videos are read with byte-range file handle reads, so large videos do not need to be loaded fully into memory.
+
+Remote URLs are read through Mediabunny's URL source. Request headers can be passed through the `headers` option.
 
 On iOS, picking videos with `expo-image-picker` is fastest when you keep the original asset representation:
 
@@ -37,7 +39,7 @@ That avoids unnecessary copying or transcoding before metadata is read.
 
 ### Web
 
-Web support uses [Mediabunny](https://mediabunny.dev). It parses the media file in the browser instead of relying on `<video>` metadata events, which gives much better parity with native for codecs, audio channels, audio sample rate, rotation, HDR, frame rate, and metadata tags.
+Web uses the same Mediabunny parser. It parses the media file in the browser instead of relying on `<video>` metadata events, which keeps the result shape aligned with iOS and Android for codecs, audio channels, audio sample rate, rotation, HDR, frame rate, and metadata tags.
 
 Local web sources can be passed as `File`, `Blob`, `blob:` URLs, or `data:` URLs.
 
@@ -86,7 +88,7 @@ getVideoInfoAsync(
 
 `source` can be:
 
-- a local file URI
+- a local `file://` or `content://` URI on iOS and Android
 - a remote URL
 - a `File` or `Blob` on web
 - a `blob:` or `data:` URL on web

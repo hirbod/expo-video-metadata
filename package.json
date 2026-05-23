@@ -1,7 +1,7 @@
 {
   "name": "expo-video-metadata",
   "version": "1.5.0",
-  "description": "Module to retrieve metadata from a video with Web, Expo and React Native",
+  "description": "Video metadata parser for Expo and React Native",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
@@ -43,8 +43,9 @@
     "react": "*",
     "react-native": "*"
   },
-  "packageManager": "yarn@4.5.3",
+  "packageManager": "yarn@4.15.0",
   "dependencies": {
+    "expo-file-system": "^56.0.7",
     "mediabunny": "^1.45.3"
   }
 }
