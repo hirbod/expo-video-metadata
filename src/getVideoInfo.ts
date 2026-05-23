@@ -1,17 +1,22 @@
 import {
-  HLS_FORMATS,
+  ALL_FORMATS,
   Input,
-  MATROSKA,
-  OGG,
-  QTFF,
-  WEBM,
+  type InputAudioTrack,
+  type InputTrack,
+  type InputVideoTrack,
   type MetadataTags,
 } from "mediabunny";
 
 import type {
+  AudioTrackInfo,
+  BaseTrackInfo,
+  MediaTrackInfo,
+  MetadataTagsInfo,
+  PacketStatsInfo,
   VideoInfoOptions,
   VideoInfoResult,
   VideoSource,
+  VideoTrackInfo,
 } from "./ExpoVideoMetadata.types";
 import {
   createSourceInfo,
@@ -23,14 +28,7 @@ type Location = VideoInfoResult["location"];
 
 const ISO_6709_PATTERN =
   /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?\/?$/;
-
-const VIDEO_INPUT_FORMATS = [
-  ...HLS_FORMATS,
-  QTFF,
-  MATROSKA,
-  WEBM,
-  OGG,
-];
+const DEFAULT_PACKET_STATS_SAMPLE_COUNT = 30;
 
 // Raw location metadata keys vary by container and writer. QuickTime/iOS files
 // commonly use ISO 6709 GPS strings under one of these atom/tag names.
@@ -49,10 +47,50 @@ async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-async function getDuration(input: Input, tracks: Awaited<ReturnType<Input["getTracks"]>>) {
+async function getDuration(
+  input: Input,
+  tracks: InputTrack[],
+  options: VideoInfoOptions
+) {
+  if (options.exactDuration) {
+    return await input.computeDuration(tracks, { skipLiveWait: true });
+  }
+
   return (
     (await input.getDurationFromMetadata(tracks, { skipLiveWait: true })) ??
     (await input.computeDuration(tracks, { skipLiveWait: true }))
+  );
+}
+
+async function getTrackEnd(track: InputTrack, options: VideoInfoOptions) {
+  if (options.exactDuration) {
+    return await track.computeDuration({ skipLiveWait: true });
+  }
+
+  return (
+    (await track.getDurationFromMetadata({ skipLiveWait: true })) ??
+    (await track.computeDuration({ skipLiveWait: true }))
+  );
+}
+
+function getPacketStatsSampleCount(options: VideoInfoOptions) {
+  return options.packetStatsSampleCount === undefined
+    ? DEFAULT_PACKET_STATS_SAMPLE_COUNT
+    : options.packetStatsSampleCount;
+}
+
+async function getPacketStats(
+  track: InputTrack,
+  options: VideoInfoOptions
+): Promise<PacketStatsInfo | null> {
+  const sampleCount = getPacketStatsSampleCount(options);
+
+  return await safeRead(
+    () =>
+      sampleCount === null
+        ? track.computePacketStats(undefined, { skipLiveWait: true })
+        : track.computePacketStats(sampleCount, { skipLiveWait: true }),
+    null
   );
 }
 
@@ -175,6 +213,147 @@ function normalizeAudioCodec(codec: string | null, codecParameterString: string 
   return codecParameterString?.split(".")[0] ?? "";
 }
 
+function normalizeMetadataTags(metadata: MetadataTags): MetadataTagsInfo | null {
+  const result: MetadataTagsInfo = {
+    title: metadata.title,
+    description: metadata.description,
+    artist: metadata.artist,
+    album: metadata.album,
+    albumArtist: metadata.albumArtist,
+    trackNumber: metadata.trackNumber,
+    tracksTotal: metadata.tracksTotal,
+    discNumber: metadata.discNumber,
+    discsTotal: metadata.discsTotal,
+    genre: metadata.genre,
+    date: metadata.date?.toISOString().slice(0, 10),
+    lyrics: metadata.lyrics,
+    comment: metadata.comment,
+    images: metadata.images?.map((image) => ({
+      mimeType: image.mimeType,
+      data: image.data,
+      size: image.data.byteLength,
+    })),
+    rawTagCount: metadata.raw && Object.keys(metadata.raw).length,
+    raw: metadata.raw,
+  };
+
+  const hasValue = Object.values(result).some((value) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+
+    return value !== undefined && value !== null;
+  });
+
+  return hasValue ? result : null;
+}
+
+async function getBaseTrackInfo(
+  track: InputTrack,
+  options: VideoInfoOptions
+): Promise<BaseTrackInfo> {
+  const [codec, codecParameterString, start, end, languageCode, packetStats] =
+    await Promise.all([
+      safeRead(() => track.getCodec(), null),
+      safeRead(() => track.getCodecParameterString(), null),
+      safeRead(() => track.getFirstTimestamp(), 0),
+      safeRead(() => getTrackEnd(track, options), 0),
+      safeRead(() => track.getLanguageCode(), "und"),
+      getPacketStats(track, options),
+    ]);
+
+  return {
+    type: track.type,
+    codec,
+    codecParameterString,
+    start,
+    end,
+    languageCode,
+    packetStats,
+  };
+}
+
+async function getVideoTrackInfo(
+  track: InputVideoTrack,
+  options: VideoInfoOptions
+): Promise<VideoTrackInfo> {
+  const [
+    base,
+    codedWidth,
+    codedHeight,
+    rotation,
+    pixelAspectRatio,
+    displayWidth,
+    displayHeight,
+    transparency,
+    colorSpace,
+    hdr,
+  ] = await Promise.all([
+    getBaseTrackInfo(track, options),
+    safeRead(() => track.getCodedWidth(), 0),
+    safeRead(() => track.getCodedHeight(), 0),
+    safeRead(() => track.getRotation(), 0),
+    safeRead(() => track.getPixelAspectRatio(), { num: 1, den: 1 }),
+    safeRead(() => track.getDisplayWidth(), 0),
+    safeRead(() => track.getDisplayHeight(), 0),
+    safeRead(() => track.canBeTransparent(), false),
+    safeRead(() => track.getColorSpace(), {}),
+    safeRead(() => track.hasHighDynamicRange(), null),
+  ]);
+
+  return {
+    ...base,
+    type: "video",
+    codedWidth,
+    codedHeight,
+    rotation,
+    pixelAspectRatio,
+    displayWidth,
+    displayHeight,
+    transparency,
+    colorSpace: {
+      primaries: colorSpace.primaries ?? null,
+      transfer: colorSpace.transfer ?? null,
+      matrix: colorSpace.matrix ?? null,
+      fullRange: colorSpace.fullRange ?? null,
+      hdr,
+    },
+  };
+}
+
+async function getAudioTrackInfo(
+  track: InputAudioTrack,
+  options: VideoInfoOptions
+): Promise<AudioTrackInfo> {
+  const [base, numberOfChannels, sampleRate] = await Promise.all([
+    getBaseTrackInfo(track, options),
+    safeRead(() => track.getNumberOfChannels(), 0),
+    safeRead(() => track.getSampleRate(), 0),
+  ]);
+
+  return {
+    ...base,
+    type: "audio",
+    numberOfChannels,
+    sampleRate,
+  };
+}
+
+async function getTrackInfo(
+  track: InputTrack,
+  options: VideoInfoOptions
+): Promise<MediaTrackInfo> {
+  if (track.isVideoTrack()) {
+    return await getVideoTrackInfo(track, options);
+  }
+
+  if (track.isAudioTrack()) {
+    return await getAudioTrackInfo(track, options);
+  }
+
+  return await getBaseTrackInfo(track, options);
+}
+
 function createRemoteReadError(source: string, cause: unknown) {
   const error = new Error(
     `Failed to read remote video metadata from '${source}'. On web, remote videos must allow CORS and byte-range requests.`
@@ -200,101 +379,65 @@ export async function getVideoInfo(
   try {
     const sourceInfo = await createSourceInfo(source, options);
     input = new Input({
-      formats: VIDEO_INPUT_FORMATS,
+      formats: ALL_FORMATS,
       source: sourceInfo.source,
     });
 
-    const [tracks, videoTrack, audioTracks, audioTrack, metadata] =
-      await Promise.all([
-        input.getTracks(),
-        input.getPrimaryVideoTrack(),
-        input.getAudioTracks(),
-        input.getPrimaryAudioTrack(),
-        input.getMetadataTags(),
-      ]);
+    const [tracks, metadata] = await Promise.all([
+      input.getTracks(),
+      input.getMetadataTags(),
+    ]);
+    const [format, mimeType, start, end, trackInfo] = await Promise.all([
+      input.getFormat().then((format) => format.name),
+      input.getMimeType(),
+      safeRead(() => input!.getFirstTimestamp(tracks), 0),
+      getDuration(input, tracks, options),
+      Promise.all(tracks.map((track) => getTrackInfo(track, options))),
+    ]);
 
-    const duration = await getDuration(input, tracks);
-    const hasAudio = audioTracks.length > 0;
-
-    let width = 0;
-    let height = 0;
-    let fps = 0;
-    let bitRate = 0;
-    let codec = "";
-    let isHDR: boolean | null = null;
-    let orientation: VideoInfoResult["orientation"] = "LandscapeRight";
-
-    if (videoTrack) {
-      const [codedWidth, codedHeight, rotation] = await Promise.all([
-        videoTrack.getCodedWidth(),
-        videoTrack.getCodedHeight(),
-        videoTrack.getRotation(),
-      ]);
-      const [
-        videoBitRate,
-        averageVideoBitRate,
-        videoCodecParameterString,
-        videoCodec,
-        videoIsHDR,
-        packetStats,
-      ] = await Promise.all([
-        safeRead(() => videoTrack.getBitrate(), null),
-        safeRead(() => videoTrack.getAverageBitrate(), null),
-        safeRead(() => videoTrack.getCodecParameterString(), null),
-        safeRead(() => videoTrack.getCodec(), null),
-        safeRead(() => videoTrack.hasHighDynamicRange(), null),
-        safeRead(() => videoTrack.computePacketStats(100, { skipLiveWait: true }), null),
-      ]);
-
-      width = codedWidth;
-      height = codedHeight;
-      fps = packetStats?.averagePacketRate ?? 0;
-      bitRate =
-        videoBitRate ??
-        averageVideoBitRate ??
-        packetStats?.averageBitrate ??
-        (sourceInfo.fileSize && duration
-          ? Math.floor((sourceInfo.fileSize * 8) / duration)
-          : 0);
-      codec = normalizeVideoCodec(videoCodec, videoCodecParameterString);
-      isHDR = videoIsHDR;
-      orientation = getOrientation(rotation, width, height);
-    }
-
-    let audioSampleRate = 0;
-    let audioChannels = 0;
-    let audioCodec = "";
-
-    if (audioTrack) {
-      const [sampleRate, numberOfChannels, audioCodecParameterString, codec] =
-        await Promise.all([
-          safeRead(() => audioTrack.getSampleRate(), 0),
-          safeRead(() => audioTrack.getNumberOfChannels(), 0),
-          safeRead(() => audioTrack.getCodecParameterString(), null),
-          safeRead(() => audioTrack.getCodec(), null),
-        ]);
-
-      audioSampleRate = sampleRate;
-      audioChannels = numberOfChannels;
-      audioCodec = normalizeAudioCodec(codec, audioCodecParameterString);
-    }
-
+    const videoTrack = trackInfo.find(
+      (track): track is VideoTrackInfo => track.type === "video"
+    );
+    const audioTrack = trackInfo.find(
+      (track): track is AudioTrackInfo => track.type === "audio"
+    );
+    const metadataTags = normalizeMetadataTags(metadata);
+    const duration = Math.max(0, end - start);
+    const width = videoTrack?.codedWidth ?? 0;
+    const height = videoTrack?.codedHeight ?? 0;
     const aspectRatio = width > 0 && height > 0 ? width / height : 0;
+    const bitRate =
+      videoTrack?.packetStats?.averageBitrate ??
+      (sourceInfo.fileSize && duration
+        ? Math.floor((sourceInfo.fileSize * 8) / duration)
+        : 0);
 
     return {
+      format,
+      mimeType,
+      start,
+      end,
+      tracks: trackInfo,
+      metadataTags,
+      fileSize: sourceInfo.fileSize,
       duration,
       width,
       height,
       bitRate,
-      fileSize: sourceInfo.fileSize,
-      hasAudio,
-      audioSampleRate,
-      isHDR,
-      audioCodec,
-      codec,
-      audioChannels,
-      fps,
-      orientation,
+      hasAudio: Boolean(audioTrack),
+      audioSampleRate: audioTrack?.sampleRate ?? 0,
+      isHDR: videoTrack?.colorSpace.hdr ?? null,
+      audioCodec: audioTrack
+        ? normalizeAudioCodec(audioTrack.codec, audioTrack.codecParameterString)
+        : "",
+      codec: videoTrack
+        ? normalizeVideoCodec(videoTrack.codec, videoTrack.codecParameterString)
+        : "",
+      audioChannels: audioTrack?.numberOfChannels ?? 0,
+      fps: videoTrack?.packetStats?.averagePacketRate ?? 0,
+      orientation: videoTrack
+        ? getOrientation(videoTrack.rotation, width, height)
+        : "LandscapeRight",
       aspectRatio,
       is16_9: Math.abs(aspectRatio - 16 / 9) < 0.01,
       naturalOrientation: height > width ? "Portrait" : "Landscape",
