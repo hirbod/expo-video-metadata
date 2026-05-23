@@ -1,55 +1,153 @@
 # expo-video-metadata
 
-This React Native (Expo) library provides a versatile function designed to extract a wide range of metadata from video files, including duration, width, height, frame rate, codec, audio availability, orientation, audio channels, audio codec, and audio sample rate. For comprehensive details, please refer to the listed exported types. Although the library is equipped with web support, its performance is reliant on specific platform APIs, leading to potential variability in its effectiveness across different browsers.
+Video metadata for Expo apps, with native support on iOS and Android and a real parser on web.
+
+This package reads duration, dimensions, frame rate, codecs, audio track info, orientation, HDR, aspect ratio, file size, and location metadata when the file contains it.
+
+It is currently maintained against **Expo SDK 56**.
 
 <img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview.png" width="500" />
 
-# Installation in bare React Native projects
+## Install
 
-This package needs **Expo SDK 50** or **higher**, as it uses FileSystem APIs that were added in that version. This package adds native code to your project and does not work with Expo Go. Please use a custom dev client or build a standalone app. Works with Fabric. Needs RN 0.73+ (Java JDK 17)
-
-For bare React Native projects, you must ensure that you have [installed and configured the `expo` package](https://docs.expo.dev/bare/installing-expo-modules/) before continuing (SDK 50+). This just adds ~150KB to your final app size and is the easiest way to get started and it works with and without Expo projects.
-
-### Add the package to your npm dependencies
-
-```
+```sh
 npx expo install expo-video-metadata
 ```
 
-### Configure for iOS
+This package contains native code. It works in development builds and production builds, not Expo Go.
 
-Run `npx pod-install` after installing the npm package.
+For bare React Native apps, install and configure Expo modules first:
 
-### Configure for Android
+https://docs.expo.dev/bare/installing-expo-modules/
 
-No additional set up necessary.
+## Platform Notes
 
-# API
+### iOS and Android
 
-```ts
-import { getVideoInfoAsync } from 'expo-video-metadata';
+iOS and Android use native platform metadata APIs. Local files work directly. Remote URLs are supported, and request headers can be passed through the `headers` option.
 
-/**
- * Retrieves video metadata.
- *
- * @param sourceFilename An URI of the video, local or remote. On web, it can be a File or Blob object, too. base64 URIs are supported but not recommended, as they can be very large and cause performance issues.
- * @param options Pass `headers` object in case `sourceFilename` is a remote URI, e.g { headers: "Authorization": "Bearer some-token" } etc.
- *
- * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
- */
-
-const result = await getVideoInfoAsync(sourceFilename: string | File | Blob, options: VideoInfoOptions = {}): Promise<VideoInfoResult>
-```
-
-See [VideoInfoResult](https://github.com/hirbod/expo-video-metadata/blob/main/src/ExpoVideoMetadata.types.ts#L1) type for more information.
-
-## Hints
-
-If you're using libraries like expo-image-picker, make sure to use [preferredAssetRepresentationMode](https://docs.expo.dev/versions/latest/sdk/imagepicker/#imagepickeroptions) option like this:
+On iOS, picking videos with `expo-image-picker` is fastest when you keep the original asset representation:
 
 ```ts
-preferredAssetRepresentationMode: ImagePicker
-  .UIImagePickerPreferredAssetRepresentationMode.Current;
+preferredAssetRepresentationMode:
+  ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
 ```
 
-when picking a video. This will avoid the need to copy or transcode the video file and thus be a lot faster on iOS. If you use a different library, make sure to use the equivalent option. Location data is not supported with expo-image-picker, unless you set `legacy` to `true`.
+That avoids unnecessary copying or transcoding before metadata is read.
+
+### Web
+
+Web support uses [Mediabunny](https://mediabunny.dev). It parses the media file in the browser instead of relying on `<video>` metadata events, which gives much better parity with native for codecs, audio channels, audio sample rate, rotation, HDR, frame rate, and metadata tags.
+
+Local web sources can be passed as `File`, `Blob`, `blob:` URLs, or `data:` URLs.
+
+Remote web sources are read with `fetch`, so browser rules apply:
+
+- The server must allow CORS, for example with `Access-Control-Allow-Origin`.
+- The server should support byte-range requests with `Accept-Ranges: bytes`.
+- If the video needs auth, pass headers through `VideoInfoOptions`.
+
+If a remote URL works on iOS or Android but fails on web, it is usually a CORS issue. Native networking is not subject to browser CORS.
+
+## Usage
+
+```ts
+import { getVideoInfoAsync } from "expo-video-metadata";
+
+const info = await getVideoInfoAsync(videoUri);
+```
+
+With headers for a remote file:
+
+```ts
+const info = await getVideoInfoAsync("https://example.com/video.mp4", {
+  headers: {
+    Authorization: "Bearer token",
+  },
+});
+```
+
+On web, you can also pass a `File` or `Blob`:
+
+```ts
+const info = await getVideoInfoAsync(file);
+```
+
+## API
+
+```ts
+getVideoInfoAsync(
+  source: string | File | Blob,
+  options?: {
+    headers?: Record<string, string>;
+  }
+): Promise<VideoInfoResult>
+```
+
+`source` can be:
+
+- a local file URI
+- a remote URL
+- a `File` or `Blob` on web
+- a `blob:` or `data:` URL on web
+
+Base64/data URLs work on web, but they are not ideal for large videos.
+
+## Result
+
+```ts
+type VideoInfoResult = {
+  duration: number;
+  hasAudio: boolean;
+  isHDR: boolean | null;
+  width: number;
+  height: number;
+  fps: number;
+  bitRate: number;
+  fileSize: number;
+  codec: string;
+  orientation:
+    | "Portrait"
+    | "PortraitUpsideDown"
+    | "Landscape"
+    | "LandscapeRight"
+    | "LandscapeLeft";
+  naturalOrientation: "Portrait" | "Landscape";
+  aspectRatio: number;
+  is16_9: boolean;
+  audioSampleRate: number;
+  audioChannels: number;
+  audioCodec: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+  } | null;
+};
+```
+
+Some fields depend on what the file actually exposes. For example, location metadata is only returned when the video contains a readable GPS tag.
+
+## Example With Expo Image Picker
+
+```ts
+import * as ImagePicker from "expo-image-picker";
+import { getVideoInfoAsync } from "expo-video-metadata";
+
+const result = await ImagePicker.launchImageLibraryAsync({
+  mediaTypes: "videos",
+  base64: false,
+  exif: true,
+  legacy: false,
+  videoQuality: ImagePicker.UIImagePickerControllerQualityType.High,
+  preferredAssetRepresentationMode:
+    ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+});
+
+if (!result.canceled) {
+  const info = await getVideoInfoAsync(result.assets[0].uri);
+  console.log(info);
+}
+```
+
+`expo-image-picker` may not expose location data unless `legacy` is enabled, even when the original video contains it.
