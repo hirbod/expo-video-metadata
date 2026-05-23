@@ -6,7 +6,7 @@ This package reads duration, dimensions, frame rate, codecs, audio track info, o
 
 It is currently maintained against **Expo SDK 56**.
 
-<img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview_2026_mediabunny.png" width="500" />
+<img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview_2026_mediabunny.png" width="800" />
 
 ## Install
 
