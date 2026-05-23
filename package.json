@@ -43,5 +43,8 @@
     "react": "*",
     "react-native": "*"
   },
-  "packageManager": "yarn@4.5.3"
+  "packageManager": "yarn@4.5.3",
+  "dependencies": {
+    "mediabunny": "^1.45.3"
+  }
 }

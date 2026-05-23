@@ -1,235 +1,325 @@
+import {
+  BlobSource,
+  HLS_FORMATS,
+  Input,
+  MATROSKA,
+  OGG,
+  QTFF,
+  UrlSource,
+  WEBM,
+  type MetadataTags,
+  type Source,
+} from "mediabunny";
+
 import type {
   VideoInfoOptions,
   VideoInfoResult,
   VideoSource,
 } from "./ExpoVideoMetadata.types";
 
-interface Track {
-  id: string;
-  kind: string;
-  label: string;
-  language: string;
+type Location = VideoInfoResult["location"];
+
+type SourceInfo = {
+  source: Source;
+  fileSize: number;
+};
+
+const ISO_6709_PATTERN =
+  /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?\/?$/;
+
+const VIDEO_INPUT_FORMATS = [
+  ...HLS_FORMATS,
+  QTFF,
+  MATROSKA,
+  WEBM,
+  OGG,
+];
+
+// Raw location metadata keys vary by container and writer. QuickTime/iOS files
+// commonly use ISO 6709 GPS strings under one of these atom/tag names.
+const LOCATION_METADATA_KEYS = [
+  "com.apple.quicktime.location.ISO6709",
+  "location.ISO6709",
+  "©xyz",
+  "xyz",
+];
+
+function isBlobLikeSource(source: string) {
+  return source.startsWith("blob:") || source.startsWith("data:");
 }
 
-interface AudioTrack extends Track {
-  enabled: boolean;
+async function createSourceInfo(
+  source: VideoSource,
+  options: VideoInfoOptions
+): Promise<SourceInfo> {
+  if (source instanceof Blob) {
+    return {
+      source: new BlobSource(source),
+      fileSize: source.size,
+    };
+  }
+
+  if (isBlobLikeSource(source)) {
+    const response = await fetch(source);
+    const blob = await response.blob();
+
+    return {
+      source: new BlobSource(blob),
+      fileSize: blob.size,
+    };
+  }
+
+  const urlSource = new UrlSource(source, {
+    requestInit: {
+      headers: options.headers,
+    },
+    getRetryDelay: () => null,
+  });
+
+  return {
+    source: urlSource,
+    fileSize: (await safeRead(() => urlSource.getSizeOrNull(), null)) ?? 0,
+  };
 }
 
-interface VideoTrack extends Track {
-  selected: boolean;
+async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await read();
+  } catch {
+    return fallback;
+  }
 }
 
-type TrackList<T> = T[];
+async function getDuration(input: Input, tracks: Awaited<ReturnType<Input["getTracks"]>>) {
+  return (
+    (await input.getDurationFromMetadata(tracks, { skipLiveWait: true })) ??
+    (await input.computeDuration(tracks, { skipLiveWait: true }))
+  );
+}
 
-interface HTMLVideoElementWithTracks extends HTMLVideoElement {
-  videoTracks?: TrackList<VideoTrack>;
-  audioTracks?: TrackList<AudioTrack>;
-  mozHasAudio?: boolean;
-  webkitAudioDecodedByteCount?: number;
-  captureStream?(): MediaStream;
+function normalizeRotation(rotation: number) {
+  return ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
+}
+
+function getOrientation(
+  rotation: number,
+  width: number,
+  height: number
+): VideoInfoResult["orientation"] {
+  const isNaturallyPortrait = height > width;
+
+  switch (normalizeRotation(rotation)) {
+    case 0:
+      return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
+    case 90:
+      return "Portrait";
+    case 180:
+      return isNaturallyPortrait ? "PortraitUpsideDown" : "LandscapeLeft";
+    case 270:
+      return "PortraitUpsideDown";
+    default:
+      return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
+  }
+}
+
+function parseISO6709Location(value: string): Location {
+  const match = value.trim().match(ISO_6709_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const latitude = Number(match[1]);
+  const longitude = Number(match[2]);
+  const altitude = match[3] == null ? undefined : Number(match[3]);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    ...(Number.isFinite(altitude) ? { altitude } : {}),
+  };
+}
+
+function decodeMetadataValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value instanceof Uint8Array) {
+    return new TextDecoder().decode(value);
+  }
+
+  return null;
+}
+
+function findLocationInMetadata(metadata: MetadataTags): Location {
+  const raw = metadata.raw ?? {};
+
+  for (const key of LOCATION_METADATA_KEYS) {
+    const value = decodeMetadataValue(raw[key]);
+    const location = value ? parseISO6709Location(value) : null;
+
+    if (location) {
+      return location;
+    }
+  }
+
+  for (const value of Object.values(raw)) {
+    const decodedValue = decodeMetadataValue(value);
+    const location = decodedValue ? parseISO6709Location(decodedValue) : null;
+
+    if (location) {
+      return location;
+    }
+
+    if (value && typeof value === "object" && !(value instanceof Uint8Array)) {
+      for (const nestedValue of Object.values(value)) {
+        if (typeof nestedValue !== "string") {
+          continue;
+        }
+
+        const nestedLocation = parseISO6709Location(nestedValue);
+        if (nestedLocation) {
+          return nestedLocation;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function createRemoteReadError(source: string, cause: unknown) {
+  const error = new Error(
+    `Failed to read remote video metadata from '${source}'. On web, remote videos must allow CORS and byte-range requests.`
+  );
+  (error as Error & { cause?: unknown }).cause = cause;
+
+  return error;
 }
 
 export default {
   name: "ExpoVideoMetadata",
 
-  getVideoOrientation(video: HTMLVideoElementWithTracks) {
-    // Get the video element's transform style
-    const transform = window.getComputedStyle(video).transform;
-    const matrix = new DOMMatrix(transform);
-
-    // Calculate rotation angle from transform matrix
-    const rotation = Math.round(Math.atan2(matrix.b, matrix.a) * (180 / Math.PI));
-
-    // Get natural dimensions
-    const { videoWidth: width, videoHeight: height } = video;
-    const isNaturallyPortrait = height > width;
-
-    // First check if there's rotation applied via CSS transform
-    if (rotation !== 0) {
-      switch ((rotation + 360) % 360) {
-        case 90:
-          return "Portrait";
-        case 270:
-          return "PortraitUpsideDown";
-        case 0:
-          return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
-        case 180:
-          return isNaturallyPortrait ? "PortraitUpsideDown" : "LandscapeLeft";
-      }
-    }
-
-    // If no rotation, use natural dimensions
-    // Check for exact 16:9 ratio to handle the special case
-    const aspectRatio = width / height;
-    const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
-
-    if (is16_9) {
-      // For 16:9 videos, try to detect orientation from video track data
-      const videoTrack = video.videoTracks?.[0];
-      if (videoTrack?.label?.toLowerCase().includes('portrait')) {
-        return "Portrait";
-      }
-    }
-
-    // Default to dimensions-based orientation
-    return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
-  },
-
-  getVideoFrameRate(videoElement: HTMLVideoElementWithTracks) {
-    if (!videoElement.captureStream) {
-      console.info("captureStream method not supported");
-      return 0;
-    }
-
-    const stream = videoElement.captureStream();
-    const [videoTrack] = stream.getVideoTracks();
-
-    if (!videoTrack) {
-      console.info("No video track found");
-      return 0;
-    }
-
-    return videoTrack.getSettings().frameRate ?? 0;
-  },
-
-  async getAudioBuffer(
-    audioUrl: string,
-    options: RequestInit = {}
-  ): Promise<{ sampleRate: number; numberOfChannels: number }> {
-    try {
-      const response = await fetch(audioUrl, options);
-      const arrayBuffer = await response.arrayBuffer();
-
-      const audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
-
-      try {
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        return {
-          sampleRate: audioBuffer.sampleRate,
-          numberOfChannels: audioBuffer.numberOfChannels,
-        };
-      } catch (decodeError) {
-        console.info("Error decoding audio data (no audio?):", decodeError);
-        return { sampleRate: 0, numberOfChannels: 0 };
-      } finally {
-        await audioContext.close();
-      }
-    } catch (error) {
-      console.info("Error decoding audio data (CORS?):", error);
-      return { sampleRate: 0, numberOfChannels: 0 };
-    }
-  },
-
-  getBase64FileSize(base64String: string): number {
-    const base64Data = base64String.replace(/^data:.+;base64,/, "");
-    return atob(base64Data).length;
-  },
-
-  async getFileSize(url: string, options: RequestInit = {}): Promise<number> {
-    if (url.startsWith("data:")) {
-      return this.getBase64FileSize(url);
-    }
-
-    try {
-      const response = await fetch(url, { method: "HEAD", ...options });
-      const contentLength = response.headers.get("Content-Length");
-      return contentLength ? parseInt(contentLength, 10) : 0;
-    } catch (error) {
-      console.info("Error fetching file size for URL (CORS?):", url, error);
-      return 0;
-    }
-  },
-
   async getVideoInfo(
     source: VideoSource,
     options: VideoInfoOptions = {}
   ): Promise<VideoInfoResult> {
-    const video = document.createElement("video") as HTMLVideoElementWithTracks;
-    let videoUrl = "";
-
-    if (typeof source === "string") {
-      videoUrl = source;
-    } else if (source instanceof File || source instanceof Blob) {
-      videoUrl = URL.createObjectURL(source);
-    }
-
-    Object.assign(video, {
-      crossOrigin: "anonymous",
-      autoplay: true,
-      muted: true,
-      playsInline: true,
+    const sourceInfo = await createSourceInfo(source, options);
+    const input = new Input({
+      formats: VIDEO_INPUT_FORMATS,
+      source: sourceInfo.source,
     });
 
-    const resetVideo = () => {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-      video.remove();
-      // Revoke the object URL if it was created
-      if (source instanceof File || source instanceof Blob) {
-        URL.revokeObjectURL(videoUrl);
-      }
-    };
-
     try {
-      await new Promise<void>((resolve, reject) => {
-        // Can't use `loadedmetadata` event because it does not contain videoTracks, audioTracks and other metadata
-        video.onloadeddata = () => resolve();
-        video.onerror = () => reject(new Error("Failed to load video metadata"));
-        video.src = videoUrl;
-        video.load();
-        video.pause();
-      });
+      const [tracks, videoTrack, audioTracks, audioTrack, metadata] =
+        await Promise.all([
+          input.getTracks(),
+          input.getPrimaryVideoTrack(),
+          input.getAudioTracks(),
+          input.getPrimaryAudioTrack(),
+          input.getMetadataTags(),
+        ]);
 
-      const { duration, videoWidth: width, videoHeight: height } = video;
-      const videoTrack = video.videoTracks?.[0];
-      const audioTrack = video.audioTracks?.[0];
+      const duration = await getDuration(input, tracks);
+      const hasAudio = audioTracks.length > 0;
 
-      const hasAudio =
-        Boolean(video.audioTracks?.length) ||
-        video.mozHasAudio ||
-        Boolean(video.webkitAudioDecodedByteCount);
+      let width = 0;
+      let height = 0;
+      let fps = 0;
+      let bitRate = 0;
+      let codec = "";
+      let isHDR: boolean | null = null;
+      let orientation: VideoInfoResult["orientation"] = "LandscapeRight";
 
-      const fileSize =
-        source instanceof File || source instanceof Blob
-          ? source.size
-          : await this.getFileSize(videoUrl, options);
+      if (videoTrack) {
+        const [codedWidth, codedHeight, rotation] = await Promise.all([
+          videoTrack.getCodedWidth(),
+          videoTrack.getCodedHeight(),
+          videoTrack.getRotation(),
+        ]);
+        const [
+          videoBitRate,
+          averageVideoBitRate,
+          videoCodecParameterString,
+          videoCodec,
+          videoIsHDR,
+          packetStats,
+        ] = await Promise.all([
+          safeRead(() => videoTrack.getBitrate(), null),
+          safeRead(() => videoTrack.getAverageBitrate(), null),
+          safeRead(() => videoTrack.getCodecParameterString(), null),
+          safeRead(() => videoTrack.getCodec(), null),
+          safeRead(() => videoTrack.hasHighDynamicRange(), null),
+          safeRead(() => videoTrack.computePacketStats(100, { skipLiveWait: true }), null),
+        ]);
 
-      const bitRate =
-        fileSize && duration ? Math.floor(fileSize / duration) : 0;
+        width = codedWidth;
+        height = codedHeight;
+        fps = packetStats?.averagePacketRate ?? 0;
+        bitRate =
+          videoBitRate ??
+          averageVideoBitRate ??
+          packetStats?.averageBitrate ??
+          (sourceInfo.fileSize && duration
+            ? Math.floor((sourceInfo.fileSize * 8) / duration)
+            : 0);
+        codec = videoCodecParameterString ?? videoCodec ?? "";
+        isHDR = videoIsHDR;
+        orientation = getOrientation(rotation, width, height);
+      }
 
-      const { numberOfChannels: audioChannels, sampleRate: audioSampleRate } =
-        await this.getAudioBuffer(videoUrl, options);
+      let audioSampleRate = 0;
+      let audioChannels = 0;
+      let audioCodec = "";
 
-      const fps = this.getVideoFrameRate(video);
-      const orientation = this.getVideoOrientation(video);
+      if (audioTrack) {
+        const [sampleRate, numberOfChannels, audioCodecParameterString, codec] =
+          await Promise.all([
+            safeRead(() => audioTrack.getSampleRate(), 0),
+            safeRead(() => audioTrack.getNumberOfChannels(), 0),
+            safeRead(() => audioTrack.getCodecParameterString(), null),
+            safeRead(() => audioTrack.getCodec(), null),
+          ]);
 
-      // Calculate additional metadata
-      const aspectRatio = width / height;
-      const is16_9 = Math.abs(aspectRatio - 16/9) < 0.01;
+        audioSampleRate = sampleRate;
+        audioChannels = numberOfChannels;
+        audioCodec = audioCodecParameterString ?? codec ?? "";
+      }
+
+      const aspectRatio = width > 0 && height > 0 ? width / height : 0;
 
       return {
         duration,
         width,
         height,
         bitRate,
-        fileSize,
+        fileSize: sourceInfo.fileSize,
         hasAudio,
         audioSampleRate,
-        isHDR: null, // not supported on web
-        audioCodec: audioTrack?.label ?? "",
-        codec: videoTrack?.label ?? "",
+        isHDR,
+        audioCodec,
+        codec,
         audioChannels,
         fps,
         orientation,
         aspectRatio,
-        is16_9,
-        naturalOrientation: width >= height ? "Landscape" : "Portrait",
-        location: null, // not supported on web
+        is16_9: Math.abs(aspectRatio - 16 / 9) < 0.01,
+        naturalOrientation: height > width ? "Portrait" : "Landscape",
+        location: findLocationInMetadata(metadata),
       };
+    } catch (error) {
+      if (typeof source === "string" && !isBlobLikeSource(source)) {
+        throw createRemoteReadError(source, error);
+      }
+
+      throw error;
     } finally {
-      resetVideo();
+      input.dispose();
     }
   },
 };

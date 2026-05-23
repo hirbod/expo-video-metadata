@@ -3,8 +3,6 @@ import { VideoInfoResult, getVideoInfoAsync } from "expo-video-metadata";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { pickFile } from "./components/file-picker";
-
 export default function App() {
   const [result, setResult] = useState<VideoInfoResult | null>(null);
   const [remoteVideoIsLoading, setRemoteVideoIsLoading] = useState(false);
@@ -44,25 +42,12 @@ export default function App() {
         </Pressable>
         <Pressable
           style={styles.btn}
-          onPress={async () => {
-            const videoFile = await pickFile({
-              mediaTypes: "videos",
-            });
-            console.log(videoFile.file);
-            const videoInfo = await getVideoInfoAsync(videoFile.file);
-            setResult(videoInfo);
-          }}
-        >
-          <Text style={styles.btnText}>Custom Picker for web</Text>
-        </Pressable>
-        <Pressable
-          style={styles.btn}
           disabled={remoteVideoIsLoading}
           onPress={async () => {
             try {
               setRemoteVideoIsLoading(true);
               const videoInfo = await getVideoInfoAsync(
-                "https://download.samplelib.com/mp4/sample-5s.mp4"
+                "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
               );
               setResult(videoInfo);
             }
