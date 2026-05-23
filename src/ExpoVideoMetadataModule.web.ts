@@ -193,6 +193,29 @@ function findLocationInMetadata(metadata: MetadataTags): Location {
   return null;
 }
 
+function normalizeVideoCodec(codec: string | null, codecParameterString: string | null) {
+  switch (codec) {
+    case "avc":
+      return "avc1";
+    case "hevc":
+      return "hev1";
+    default:
+      return codec ?? codecParameterString?.split(".")[0] ?? "";
+  }
+}
+
+function normalizeAudioCodec(codec: string | null, codecParameterString: string | null) {
+  if (codec) {
+    return codec;
+  }
+
+  if (codecParameterString?.startsWith("mp4a")) {
+    return "aac";
+  }
+
+  return codecParameterString?.split(".")[0] ?? "";
+}
+
 function createRemoteReadError(source: string, cause: unknown) {
   const error = new Error(
     `Failed to read remote video metadata from '${source}'. On web, remote videos must allow CORS and byte-range requests.`
@@ -268,7 +291,7 @@ export default {
           (sourceInfo.fileSize && duration
             ? Math.floor((sourceInfo.fileSize * 8) / duration)
             : 0);
-        codec = videoCodecParameterString ?? videoCodec ?? "";
+        codec = normalizeVideoCodec(videoCodec, videoCodecParameterString);
         isHDR = videoIsHDR;
         orientation = getOrientation(rotation, width, height);
       }
@@ -288,7 +311,7 @@ export default {
 
         audioSampleRate = sampleRate;
         audioChannels = numberOfChannels;
-        audioCodec = audioCodecParameterString ?? codec ?? "";
+        audioCodec = normalizeAudioCodec(codec, audioCodecParameterString);
       }
 
       const aspectRatio = width > 0 && height > 0 ? width / height : 0;
