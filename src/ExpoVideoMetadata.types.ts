@@ -1,91 +1,111 @@
+export type PacketStatsInfo = {
+  packetCount: number;
+  averagePacketRate: number;
+  averageBitrate: number;
+};
+
+export type RationalInfo = {
+  num: number;
+  den: number;
+};
+
+export type ColorSpaceInfo = {
+  primaries: string | null;
+  transfer: string | null;
+  matrix: string | null;
+  fullRange: boolean | null;
+  hdr: boolean | null;
+};
+
+export type MetadataImageInfo = {
+  mimeType: string;
+  data: Uint8Array;
+  size: number;
+};
+
+export type MetadataTagsInfo = {
+  title?: string;
+  description?: string;
+  artist?: string;
+  album?: string;
+  albumArtist?: string;
+  trackNumber?: number;
+  tracksTotal?: number;
+  discNumber?: number;
+  discsTotal?: number;
+  genre?: string;
+  date?: string;
+  lyrics?: string;
+  comment?: string;
+  images?: MetadataImageInfo[];
+  rawTagCount?: number;
+  raw?: Record<string, unknown>;
+};
+
+export type BaseTrackInfo = {
+  type: string;
+  codec: string | null;
+  codecParameterString: string | null;
+  start: number;
+  end: number;
+  languageCode: string;
+  packetStats: PacketStatsInfo | null;
+};
+
+export type VideoTrackInfo = BaseTrackInfo & {
+  type: "video";
+  codedWidth: number;
+  codedHeight: number;
+  rotation: number;
+  pixelAspectRatio: RationalInfo;
+  displayWidth: number;
+  displayHeight: number;
+  transparency: boolean;
+  colorSpace: ColorSpaceInfo;
+};
+
+export type AudioTrackInfo = BaseTrackInfo & {
+  type: "audio";
+  numberOfChannels: number;
+  sampleRate: number;
+};
+
+export type MediaTrackInfo = BaseTrackInfo | VideoTrackInfo | AudioTrackInfo;
+
 export type VideoInfoResult = {
+  format: string;
+  mimeType: string | null;
+  start: number;
+  end: number;
+  tracks: MediaTrackInfo[];
+  metadataTags: MetadataTagsInfo | null;
+  fileSize: number;
+
   /**
-   * Duration of the video in seconds (float).
+   * Legacy convenience fields derived from the primary video and audio tracks.
    */
   duration: number;
-  /**
-   * Tells if the video has a audio track. If the video has no audio track, its considered a mute video.
-   */
   hasAudio: boolean;
-  /**
-   * Tells if the video is HDR.
-   * Will return null if it could not be determined.
-   */
   isHDR: boolean | null;
-  /**
-   * Width of the video in pixels.
-   */
   width: number;
-  /**
-   * Height of the video in pixels.
-   */
   height: number;
-  /**
-   * Frame rate of the video in frames per second.
-   * Works when the container exposes enough packet timing information.
-   */
   fps: number;
-  /**
-   * Bit rate of the video in bits per second.
-   * Supported on all platforms.
-   */
   bitRate: number;
-  /**
-   * File size of the video in bytes.
-   * Remote files return 0 when the server does not expose a readable content length.
-   */
-  fileSize: number;
-  /**
-   * Video codec.
-   * Returns an empty string when the codec cannot be determined.
-   */
   codec: string;
-  /**
-   * Video orientation.
-   * Orientation takes into account both the natural dimensions AND any rotation/transform applied to the video:
-   * - Portrait: The video is in portrait mode.
-   * - PortraitUpsideDown: The video is in portrait mode, but upside down.
-   * - Landscape: The video is in landscape mode.
-   * - LandscapeRight: The video is in landscape mode, but rotated 90 degrees clockwise.
-   * - LandscapeLeft: The video is in landscape mode, but rotated 90 degrees counter-clockwise.
-   */
   orientation:
     | "Portrait"
     | "PortraitUpsideDown"
     | "Landscape"
     | "LandscapeRight"
     | "LandscapeLeft";
-  /**
-   * Natural orientation of the video.
-   * This is the orientation of the video as it was recorded, without any rotation/transform applied.
-   */
   naturalOrientation:
     | "Portrait"
     | "Landscape";
-  /**
-   * Aspect ratio of the video.
-   */
   aspectRatio: number;
-  /**
-   * Tells if the video is 16:9.
-   */
   is16_9: boolean;
-  /**
-   * Audio sample rate of the video in samples per second.
-   */
   audioSampleRate: number;
-  /**
-   * Audio channel count of the video.
-   */
   audioChannels: number;
-  /**
-   * Audio codec of the video.
-   */
   audioCodec: string;
-  /**
-   * Location where the video was recorded.
-   * Returned when the video contains readable location metadata.
-   */
   location: {
     latitude: number;
     longitude: number;
@@ -97,7 +117,21 @@ export type VideoSource = string | File | Blob;
 
 export type VideoInfoOptions = {
   /**
-   * In case `source` is a remote URI, `headers` object is passed in a network request.
+   * In case `source` is a remote URI, `headers` object is passed in network requests.
    */
   headers?: Record<string, string>;
+  /**
+   * Set to `true` to compute exact durations by scanning packet timing when
+   * metadata duration is unavailable or approximate.
+   *
+   * Defaults to `false` for faster metadata resolution.
+   */
+  exactDuration?: boolean;
+  /**
+   * Number of packets to inspect for packet statistics. Use `null` to scan the
+   * full track, matching Mediabunny's metadata extraction demo exactly.
+   *
+   * Defaults to `30`.
+   */
+  packetStatsSampleCount?: number | null;
 };

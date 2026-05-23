@@ -2,7 +2,11 @@
 
 Video metadata for Expo apps, powered by [Mediabunny](https://mediabunny.dev) on iOS, Android, and web.
 
-This package reads duration, dimensions, frame rate, codecs, audio track info, orientation, HDR, aspect ratio, file size, and location metadata when the file contains it.
+This package exposes Mediabunny-style metadata for Expo and React Native:
+format, MIME type, start/end timestamps, per-track codecs, dimensions, rotation,
+pixel aspect ratio, display dimensions, color space, packet statistics, audio
+properties, metadata tags, embedded images, file size, and GPS location when the
+file contains it.
 
 It is currently maintained against **Expo SDK 56**.
 
@@ -39,7 +43,7 @@ That avoids unnecessary copying or transcoding before metadata is read.
 
 ### Web
 
-Web uses the same Mediabunny parser. It parses the media file in the browser instead of relying on `<video>` metadata events, which keeps the result shape aligned with iOS and Android for codecs, audio channels, audio sample rate, rotation, HDR, frame rate, and metadata tags.
+Web uses the same Mediabunny parser. It parses the media file in the browser instead of relying on `<video>` metadata events, which keeps the result shape aligned with iOS and Android.
 
 Local web sources can be passed as `File`, `Blob`, `blob:` URLs, or `data:` URLs.
 
@@ -75,6 +79,18 @@ On web, you can also pass a `File` or `Blob`:
 const info = await getVideoInfoAsync(file);
 ```
 
+When using `expo-image-picker` on web, prefer the returned `asset.file` over
+`asset.uri`:
+
+```ts
+const asset = result.assets[0];
+const info = await getVideoInfoAsync(asset.file ?? asset.uri);
+```
+
+Passing the `File` lets Mediabunny read only the byte ranges it needs. Passing a
+`blob:` URL requires loading that URL back into a `Blob` first, which can be much
+slower for large videos.
+
 ## API
 
 ```ts
@@ -82,6 +98,8 @@ getVideoInfoAsync(
   source: string | File | Blob,
   options?: {
     headers?: Record<string, string>;
+    exactDuration?: boolean;
+    packetStatsSampleCount?: number | null;
   }
 ): Promise<VideoInfoResult>
 ```
@@ -95,10 +113,34 @@ getVideoInfoAsync(
 
 Base64/data URLs work on web, but they are not ideal for large videos.
 
+By default, durations are read from metadata when possible and packet statistics
+inspect the first 30 packets of each track. That keeps metadata resolution fast
+for large files while still providing useful FPS and bitrate estimates.
+
+To match Mediabunny's metadata extraction demo more closely, use:
+
+```ts
+const info = await getVideoInfoAsync(source, {
+  exactDuration: true,
+  packetStatsSampleCount: null,
+});
+```
+
+Those settings can scan much more of the file.
+
 ## Result
 
 ```ts
 type VideoInfoResult = {
+  format: string;
+  mimeType: string | null;
+  start: number;
+  end: number;
+  tracks: MediaTrackInfo[];
+  metadataTags: MetadataTagsInfo | null;
+  fileSize: number;
+
+  // Convenience fields derived from the primary video/audio tracks:
   duration: number;
   hasAudio: boolean;
   isHDR: boolean | null;
@@ -106,7 +148,6 @@ type VideoInfoResult = {
   height: number;
   fps: number;
   bitRate: number;
-  fileSize: number;
   codec: string;
   orientation:
     | "Portrait"
@@ -126,9 +167,71 @@ type VideoInfoResult = {
     altitude?: number;
   } | null;
 };
+
+type MediaTrackInfo = {
+  type: string;
+  codec: string | null;
+  codecParameterString: string | null;
+  start: number;
+  end: number;
+  languageCode: string;
+  packetStats: {
+    packetCount: number;
+    averagePacketRate: number;
+    averageBitrate: number;
+  } | null;
+} & (
+  | {
+      type: "video";
+      codedWidth: number;
+      codedHeight: number;
+      rotation: number;
+      pixelAspectRatio: { num: number; den: number };
+      displayWidth: number;
+      displayHeight: number;
+      transparency: boolean;
+      colorSpace: {
+        primaries: string | null;
+        transfer: string | null;
+        matrix: string | null;
+        fullRange: boolean | null;
+        hdr: boolean | null;
+      };
+    }
+  | {
+      type: "audio";
+      numberOfChannels: number;
+      sampleRate: number;
+    }
+  | {}
+);
+
+type MetadataTagsInfo = {
+  title?: string;
+  description?: string;
+  artist?: string;
+  album?: string;
+  albumArtist?: string;
+  trackNumber?: number;
+  tracksTotal?: number;
+  discNumber?: number;
+  discsTotal?: number;
+  genre?: string;
+  date?: string;
+  lyrics?: string;
+  comment?: string;
+  images?: {
+    mimeType: string;
+    data: Uint8Array;
+    size: number;
+  }[];
+  rawTagCount?: number;
+  raw?: Record<string, unknown>;
+};
 ```
 
-Some fields depend on what the file actually exposes. For example, location metadata is only returned when the video contains a readable GPS tag.
+Some fields depend on what the file actually exposes. For example, location
+metadata is only returned when the video contains a readable GPS tag.
 
 ## Example With Expo Image Picker
 
@@ -147,7 +250,8 @@ const result = await ImagePicker.launchImageLibraryAsync({
 });
 
 if (!result.canceled) {
-  const info = await getVideoInfoAsync(result.assets[0].uri);
+  const asset = result.assets[0];
+  const info = await getVideoInfoAsync(asset.file ?? asset.uri);
   console.log(info);
 }
 ```
