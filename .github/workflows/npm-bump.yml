@@ -40,6 +40,9 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
+      - name: Fix expo-module-scripts bin permissions
+        run: chmod +x node_modules/expo-module-scripts/bin/expo-module-*
+
       - name: Build package
         run: yarn build
 
