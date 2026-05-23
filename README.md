@@ -100,6 +100,9 @@ getVideoInfoAsync(
     headers?: Record<string, string>;
     exactDuration?: boolean;
     packetStatsSampleCount?: number | null;
+    includeMetadataTags?: boolean;
+    includeVideoTracks?: boolean;
+    includeAudioTracks?: boolean;
   }
 ): Promise<VideoInfoResult>
 ```
@@ -113,15 +116,34 @@ getVideoInfoAsync(
 
 Base64/data URLs work on web, but they are not ideal for large videos.
 
-By default, durations are read from metadata when possible and packet statistics
-inspect the first 30 packets of each track. That keeps metadata resolution fast
-for large files while still providing useful FPS and bitrate estimates.
+By default, durations are read from metadata when possible, video and audio
+tracks are included, packet statistics inspect the first 30 packets of each
+track, and metadata tags are skipped. Skipping tags avoids extra reads for title,
+artist, comments, embedded images, raw tags, and GPS location when you only need
+technical media metadata.
+
+Use `includeMetadataTags: true` when you need container tags or location data:
+
+```ts
+const info = await getVideoInfoAsync(source, {
+  includeMetadataTags: true,
+});
+```
+
+If you only need one media kind, disable the other one:
+
+```ts
+const info = await getVideoInfoAsync(source, {
+  includeAudioTracks: false,
+});
+```
 
 To match Mediabunny's metadata extraction demo more closely, use:
 
 ```ts
 const info = await getVideoInfoAsync(source, {
   exactDuration: true,
+  includeMetadataTags: true,
   packetStatsSampleCount: null,
 });
 ```
@@ -137,7 +159,7 @@ type VideoInfoResult = {
   start: number;
   end: number;
   tracks: MediaTrackInfo[];
-  metadataTags: MetadataTagsInfo | null;
+  metadataTags?: MetadataTagsInfo | null;
   fileSize: number;
 
   // Convenience fields derived from the primary video/audio tracks:
@@ -230,8 +252,10 @@ type MetadataTagsInfo = {
 };
 ```
 
-Some fields depend on what the file actually exposes. For example, location
-metadata is only returned when the video contains a readable GPS tag.
+Some fields depend on what the file actually exposes and what options you pass.
+For example, `metadataTags` and `location` are only read when
+`includeMetadataTags` is `true`, and location is only returned when the video
+contains a readable GPS tag.
 
 ## Example With Expo Image Picker
 
@@ -251,7 +275,9 @@ const result = await ImagePicker.launchImageLibraryAsync({
 
 if (!result.canceled) {
   const asset = result.assets[0];
-  const info = await getVideoInfoAsync(asset.file ?? asset.uri);
+  const info = await getVideoInfoAsync(asset.file ?? asset.uri, {
+    includeMetadataTags: true,
+  });
   console.log(info);
 }
 ```

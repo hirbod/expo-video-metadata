@@ -32,6 +32,10 @@ type DisplayValue =
   | DisplayValue[]
   | { [key: string]: DisplayValue };
 
+const DEMO_OPTIONS = {
+  includeMetadataTags: true,
+};
+
 function isMetadataImage(value: unknown): value is MetadataImageInfo {
   return (
     value !== null &&
@@ -289,7 +293,7 @@ function AppContent() {
     setFileName(asset.fileName ?? asset.uri);
 
     try {
-      setResult(await getVideoInfoAsync(asset.file ?? asset.uri));
+      setResult(await getVideoInfoAsync(asset.file ?? asset.uri, DEMO_OPTIONS));
     } finally {
       setIsLoading(false);
     }
@@ -303,7 +307,7 @@ function AppContent() {
     setFileName(url);
 
     try {
-      setResult(await getVideoInfoAsync(url));
+      setResult(await getVideoInfoAsync(url, DEMO_OPTIONS));
     } finally {
       setIsLoading(false);
     }
