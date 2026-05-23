@@ -34,8 +34,9 @@
   "license": "MIT",
   "homepage": "https://github.com/hirbod/expo-video-metadata#readme",
   "devDependencies": {
-    "expo": "^52.0.23",
-    "expo-module-scripts": "^3.5.2"
+    "expo": "^56.0.3",
+    "expo-module-scripts": "^56.0.2",
+    "typescript": "~6.0.3"
   },
   "peerDependencies": {
     "expo": "*",

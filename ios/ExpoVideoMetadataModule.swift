@@ -1,17 +1,16 @@
 import ExpoModulesCore
 import AVFoundation
 
-public class ExpoVideoMetadataModule: Module {
+public class ExpoVideoMetadataModule: Module, @unchecked Sendable {
   public func definition() -> ModuleDefinition {
     Name("ExpoVideoMetadata")
 
-    AsyncFunction("getVideoInfo", getVideoInfo)
+    AsyncFunction("getVideoInfo") { (sourceFilename: URL, options: ExpoVideoMetadataOptions) async throws -> [String: Any] in
+      try await self.getVideoInfo(sourceFilename: sourceFilename, options: options)
+    }
   }
 
-  private func getOrientation(from videoTrack: AVAssetTrack) -> String {
-    let transform = videoTrack.preferredTransform
-    let size = videoTrack.naturalSize
-
+  private func getOrientation(transform: CGAffineTransform, size: CGSize) -> String {
     // First check natural dimensions
     let isNaturallyPortrait = size.height > size.width
 
@@ -36,16 +35,26 @@ public class ExpoVideoMetadataModule: Module {
     }
 }
 
-  internal func getVideoInfo(sourceFilename: URL, options: ExpoVideoMetadataOptions) throws -> [String: Any] {
+  internal func getVideoInfo(sourceFilename: URL, options: ExpoVideoMetadataOptions) async throws -> [String: Any] {
     if sourceFilename.isFileURL {
       guard FileSystemUtilities.permissions(appContext, for: sourceFilename).contains(.read) else {
         throw FileSystemReadPermissionException(sourceFilename.absoluteString)
       }
     }
 
-    let asset = AVURLAsset.init(url: sourceFilename, options: ["AVURLAssetHTTPHeaderFieldsKey": options.headers])
-    let duration = CMTimeGetSeconds(asset.duration)
-    let hasAudio = asset.tracks(withMediaType: .audio).count > 0
+    let assetURL = try await resolveAssetURL(sourceFilename: sourceFilename, options: options)
+    defer {
+      if assetURL != sourceFilename {
+        try? FileManager.default.removeItem(at: assetURL)
+      }
+    }
+
+    let asset = AVURLAsset(url: assetURL, options: ["AVURLAssetHTTPHeaderFieldsKey": options.headers])
+    let duration = CMTimeGetSeconds(try await asset.load(.duration))
+    let videoTracks = try await asset.loadTracks(withMediaType: .video)
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    let metadata = try await asset.load(.metadata)
+    let hasAudio = !audioTracks.isEmpty
 
     var fileSize: Int64 = 0
     if let fileAttributes = try? FileManager.default.attributesOfItem(atPath: sourceFilename.path),
@@ -67,27 +76,26 @@ public class ExpoVideoMetadataModule: Module {
     var location: [String: Double]? = nil
 
     // If there are video tracks, extract more information
-    if let videoTrack = asset.tracks(withMediaType: .video).first {
+    if let videoTrack = videoTracks.first {
       // Bitrate
-      bitrate = videoTrack.estimatedDataRate
+      bitrate = try await videoTrack.load(.estimatedDataRate)
 
       // Width and Height
-      let size = videoTrack.naturalSize
+      let size = try await videoTrack.load(.naturalSize)
       width = Int(size.width)
       height = Int(size.height)
 
       // Frame Rate
-      frameRate = videoTrack.nominalFrameRate
+      frameRate = try await videoTrack.load(.nominalFrameRate)
 
       // Codec
-      if let firstFormatDescription = videoTrack.formatDescriptions.first {
-        let formatDescription = firstFormatDescription as! CMFormatDescription
-        let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
+      if let firstFormatDescription = try await videoTrack.load(.formatDescriptions).first {
+        let codecType = CMFormatDescriptionGetMediaSubType(firstFormatDescription)
         codec = fourCharCodeToString(fourCharCode: codecType)
       }
 
       // Orientation
-      orientation = getOrientation(from: videoTrack)
+      orientation = getOrientation(transform: try await videoTrack.load(.preferredTransform), size: size)
 
       // HDR
       if #available(iOS 14.0, *) {
@@ -96,12 +104,12 @@ public class ExpoVideoMetadataModule: Module {
     }
 
     // Audio track information
-    if let audioTrack = asset.tracks(withMediaType: .audio).first {
-      audioSampleRate = Int(audioTrack.naturalTimeScale)
+    if let audioTrack = audioTracks.first {
+      audioSampleRate = Int(try await audioTrack.load(.naturalTimeScale))
 
       // Extracting audio channels from the format descriptions
-      if let formatDescriptions = audioTrack.formatDescriptions as? [CMAudioFormatDescription],
-         let firstFormatDescription = formatDescriptions.first {
+      let formatDescriptions = try await audioTrack.load(.formatDescriptions) as [CMAudioFormatDescription]
+      if let firstFormatDescription = formatDescriptions.first {
         let audioStreamBasicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(firstFormatDescription)?.pointee
         audioChannels = Int(audioStreamBasicDescription?.mChannelsPerFrame ?? 0)
 
@@ -112,9 +120,12 @@ public class ExpoVideoMetadataModule: Module {
     }
 
     // Extract GPS metadata
-    if let gpsData = extractGPSData(from: asset.metadata) {
+    if let gpsData = extractGPSData(from: metadata) {
       location = gpsData
     }
+
+    let hasDimensions = width > 0 && height > 0
+    let aspectRatio = hasDimensions ? Double(width) / Double(height) : 0
     
     return [
       "duration": duration,
@@ -128,13 +139,59 @@ public class ExpoVideoMetadataModule: Module {
       "codec": codec,
       "orientation": orientation,
       "naturalOrientation": height > width ? "Portrait" : "Landscape",
-      "aspectRatio": Double(width) / Double(height),
-      "is16_9": abs((Double(width) / Double(height)) - 16.0/9.0) < 0.01,
+      "aspectRatio": aspectRatio,
+      "is16_9": hasDimensions && abs(aspectRatio - 16.0/9.0) < 0.01,
       "audioSampleRate": audioSampleRate,
       "audioChannels": audioChannels,
       "audioCodec": audioCodec,
       "location": location as Any
     ]
+  }
+
+  private func resolveAssetURL(sourceFilename: URL, options: ExpoVideoMetadataOptions) async throws -> URL {
+    guard !sourceFilename.isFileURL else {
+      return sourceFilename
+    }
+
+    do {
+      try await assertAssetIsReadable(sourceFilename: sourceFilename, options: options)
+      return sourceFilename
+    } catch {
+      return try await downloadRemoteAsset(sourceFilename: sourceFilename, options: options)
+    }
+  }
+
+  private func assertAssetIsReadable(sourceFilename: URL, options: ExpoVideoMetadataOptions) async throws {
+    let asset = AVURLAsset(url: sourceFilename, options: ["AVURLAssetHTTPHeaderFieldsKey": options.headers])
+    _ = try await asset.load(.duration)
+    _ = try await asset.loadTracks(withMediaType: .video)
+  }
+
+  private func downloadRemoteAsset(sourceFilename: URL, options: ExpoVideoMetadataOptions) async throws -> URL {
+    var request = URLRequest(url: sourceFilename)
+    for (header, value) in options.headers {
+      request.setValue(value, forHTTPHeaderField: header)
+    }
+
+    let (downloadedURL, response) = try await URLSession.shared.download(for: request)
+    if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+      try? FileManager.default.removeItem(at: downloadedURL)
+      throw RemoteVideoDownloadException((sourceFilename.absoluteString, httpResponse.statusCode))
+    }
+
+    let fileExtension = sourceFilename.pathExtension.isEmpty ? "mp4" : sourceFilename.pathExtension
+    let temporaryURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension(fileExtension)
+
+    do {
+      try FileManager.default.moveItem(at: downloadedURL, to: temporaryURL)
+    } catch {
+      try? FileManager.default.removeItem(at: downloadedURL)
+      try? FileManager.default.removeItem(at: temporaryURL)
+      throw error
+    }
+    return temporaryURL
   }
 }
 
@@ -182,4 +239,3 @@ private func fourCharCodeToString(fourCharCode: FourCharCode) -> String {
   // Remove any trailing whitespaces, since FourCC codes are 4 characters long and padded with spaces ("aac " for example)
   return String(characters).trimmingCharacters(in: .whitespaces)
 }
-

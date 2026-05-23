@@ -1,11 +1,11 @@
-import {
+import type {
   VideoInfoOptions,
   VideoInfoResult,
   VideoSource,
 } from "./ExpoVideoMetadata.types";
 import ExpoVideoMetadataModule from "./ExpoVideoMetadataModule";
 
-export { VideoInfoOptions, VideoInfoResult };
+export type { VideoInfoOptions, VideoInfoResult };
 
 // Import the native module. On web, it will be resolved to ExpoVideoMetadata.web.ts
 // and on native platforms to ExpoVideoMetadata.ts

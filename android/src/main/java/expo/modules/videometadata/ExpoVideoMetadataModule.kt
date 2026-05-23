@@ -5,12 +5,12 @@ import android.net.Uri
 import android.util.Log
 import android.webkit.URLUtil
 import expo.modules.core.errors.ModuleDestroyedException
-import expo.modules.interfaces.filesystem.Permission
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.services.FilePermissionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -20,6 +20,8 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.abs
 
 class ExpoVideoMetadataModule : Module() {
@@ -37,115 +39,7 @@ class ExpoVideoMetadataModule : Module() {
 
       withModuleScope(promise) {
         try {
-          val retriever = MediaMetadataRetriever()
-          val extractor = MediaExtractor()
-
-          var fileSize: Long? = null
-
-          if (URLUtil.isFileUrl(sourceFilename)) {
-            retriever.setDataSource(Uri.decode(sourceFilename).replace("file://", ""))
-            extractor.setDataSource(Uri.decode(sourceFilename).replace("file://", ""))
-            fileSize = File(sourceFilename.replace("file://", "")).length()
-          } else if (URLUtil.isContentUrl(sourceFilename)) {
-            val fileUri = Uri.parse(sourceFilename)
-            fileSize = File(sourceFilename).length()
-            context.contentResolver.openFileDescriptor(fileUri, "r")?.use { parcelFileDescriptor ->
-              retriever.setDataSource(parcelFileDescriptor.fileDescriptor)
-              extractor.setDataSource(parcelFileDescriptor.fileDescriptor)
-            }
-          } else {
-            retriever.setDataSource(sourceFilename, options.headers)
-            extractor.setDataSource(sourceFilename, options.headers)
-          }
-
-          // extract metadata
-          val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-          val duration = BigDecimal(durationMs)
-            .divide(BigDecimal(1000), 15, RoundingMode.HALF_UP)
-            .toDouble()
-
-          val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
-          val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-          val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()
-          val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull()
-          val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) != null
-
-          val colorTransfer = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
-          var isHDR: Boolean? = null
-          if (colorTransfer != null) {
-            isHDR = colorTransfer == MediaFormat.COLOR_TRANSFER_ST2084 || colorTransfer == MediaFormat.COLOR_TRANSFER_HLG
-          }
-
-          // Extract GPS location
-          val location = extractGPSLocation(retriever)
-
-          // get orientation
-          val orientation = getOrientation(rotation, width, height)
-
-          // release
-          retriever.release()
-
-          // Additional metadata can be extracted here
-          var audioChannels: Int? = null
-          var audioSampleRate: Int? = null
-          var audioCodec: String? = null
-          var videoCodec: String? = null
-          var frameRate: Float? = null
-
-          val numTracks = extractor.trackCount
-          for (i in 0 until numTracks) {
-            val format = extractor.getTrackFormat(i)
-            val mimeType = format.getString(MediaFormat.KEY_MIME) ?: continue
-            if (mimeType.startsWith("audio/")) {
-              audioChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-              audioSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-              audioCodec = mapMimeTypeToCodecName(mimeType)
-            } else if (mimeType.startsWith("video/")) {
-              videoCodec = mapMimeTypeToCodecName(mimeType)
-
-              // extract video frameRate
-              if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                frameRate = try {
-                  // Try to get frame rate as Integer and convert to Float
-                  format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
-                } catch (e: Exception) {
-                  // If Integer retrieval fails, try as Float
-                  format.getFloat(MediaFormat.KEY_FRAME_RATE)
-                }
-              }
-            }
-          }
-
-          extractor.release()
-
-          promise.resolve(
-            mapOf(
-              "audioChannels" to audioChannels,
-              "duration" to duration,
-              "width" to width,
-              "height" to height,
-              "bitrate" to bitrate,
-              "fileSize" to fileSize,
-              "hasAudio" to hasAudio,
-              "isHDR" to isHDR,
-              "audioCodec" to audioCodec,
-              "orientation" to orientation,
-              "naturalOrientation" to if (width != null && height != null && width != 0 && height != 0) {
-                if (height > width) "Portrait" else "Landscape"
-              } else "Landscape",
-              "aspectRatio" to if (width != null && height != null && height != 0) {
-                width.toDouble() / height.toDouble()
-              } else null,
-              "is16_9" to if (width != null && height != null && height != 0) {
-                abs((width.toDouble() / height.toDouble()) - 16.0/9.0) < 0.01
-              } else false,
-              "audioSampleRate" to audioSampleRate,
-              "audioCodec" to audioCodec,
-              "codec" to videoCodec,
-              "fps" to frameRate,
-              "location" to location
-            )
-          )
+          promise.resolve(readVideoMetadata(sourceFilename, options, allowRemoteFallback = true))
         } catch (e: Exception) {
           Log.e(TAG, "Error retrieving video metadata: ${e.message}", e)
           promise.reject(ERROR_TAG, "Failed to retrieve video metadata", e)
@@ -160,6 +54,167 @@ class ExpoVideoMetadataModule : Module() {
         Log.e(TAG, "The scope does not have a job in it")
       }
     }
+  }
+
+  private fun readVideoMetadata(
+    sourceFilename: String,
+    options: ExpoVideoMetadataOptions,
+    allowRemoteFallback: Boolean
+  ): Map<String, Any?> {
+    val retriever = MediaMetadataRetriever()
+    val extractor = MediaExtractor()
+    var temporaryFile: File? = null
+
+    try {
+      var fileSize: Long? = null
+      val isRemoteUrl = URLUtil.isNetworkUrl(sourceFilename)
+
+      if (URLUtil.isFileUrl(sourceFilename)) {
+        val path = Uri.decode(sourceFilename).replace("file://", "")
+        retriever.setDataSource(path)
+        extractor.setDataSource(path)
+        fileSize = File(path).length()
+      } else if (URLUtil.isContentUrl(sourceFilename)) {
+        val fileUri = Uri.parse(sourceFilename)
+        fileSize = File(sourceFilename).length()
+        context.contentResolver.openFileDescriptor(fileUri, "r")?.use { parcelFileDescriptor ->
+          retriever.setDataSource(parcelFileDescriptor.fileDescriptor)
+          extractor.setDataSource(parcelFileDescriptor.fileDescriptor)
+        }
+      } else if (isRemoteUrl) {
+        retriever.setDataSource(sourceFilename, options.headers)
+        extractor.setDataSource(sourceFilename, options.headers)
+      } else {
+        retriever.setDataSource(sourceFilename)
+        extractor.setDataSource(sourceFilename)
+        fileSize = File(sourceFilename).length()
+      }
+
+      val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+      val numTracks = extractor.trackCount
+
+      if (isRemoteUrl && allowRemoteFallback && durationMs == 0L && width == null && height == null && numTracks == 0) {
+        retriever.release()
+        extractor.release()
+        temporaryFile = downloadRemoteVideo(sourceFilename, options)
+        return readVideoMetadata(temporaryFile.absolutePath, options, allowRemoteFallback = false)
+      }
+
+      val duration = BigDecimal(durationMs)
+        .divide(BigDecimal(1000), 15, RoundingMode.HALF_UP)
+        .toDouble()
+
+      val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()
+      val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull()
+      val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) != null
+
+      val colorTransfer = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)?.toIntOrNull()
+      var isHDR: Boolean? = null
+      if (colorTransfer != null) {
+        isHDR = colorTransfer == MediaFormat.COLOR_TRANSFER_ST2084 || colorTransfer == MediaFormat.COLOR_TRANSFER_HLG
+      }
+
+      val location = extractGPSLocation(retriever)
+      val orientation = getOrientation(rotation, width, height)
+
+      var audioChannels: Int? = null
+      var audioSampleRate: Int? = null
+      var audioCodec: String? = null
+      var videoCodec: String? = null
+      var frameRate: Float? = null
+
+      for (i in 0 until numTracks) {
+        val format = extractor.getTrackFormat(i)
+        val mimeType = format.getString(MediaFormat.KEY_MIME) ?: continue
+        if (mimeType.startsWith("audio/")) {
+          audioChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+          audioSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+          audioCodec = mapMimeTypeToCodecName(mimeType)
+        } else if (mimeType.startsWith("video/")) {
+          videoCodec = mapMimeTypeToCodecName(mimeType)
+
+          if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+            frameRate = try {
+              format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
+            } catch (e: Exception) {
+              format.getFloat(MediaFormat.KEY_FRAME_RATE)
+            }
+          }
+        }
+      }
+
+      return mapOf(
+        "audioChannels" to audioChannels,
+        "duration" to duration,
+        "width" to width,
+        "height" to height,
+        "bitrate" to bitrate,
+        "fileSize" to fileSize,
+        "hasAudio" to hasAudio,
+        "isHDR" to isHDR,
+        "audioCodec" to audioCodec,
+        "orientation" to orientation,
+        "naturalOrientation" to if (width != null && height != null && width != 0 && height != 0) {
+          if (height > width) "Portrait" else "Landscape"
+        } else "Landscape",
+        "aspectRatio" to if (width != null && height != null && height != 0) {
+          width.toDouble() / height.toDouble()
+        } else null,
+        "is16_9" to if (width != null && height != null && height != 0) {
+          abs((width.toDouble() / height.toDouble()) - 16.0/9.0) < 0.01
+        } else false,
+        "audioSampleRate" to audioSampleRate,
+        "audioCodec" to audioCodec,
+        "codec" to videoCodec,
+        "fps" to frameRate,
+        "location" to location
+      )
+    } finally {
+      try {
+        retriever.release()
+      } catch (_: Exception) {
+      }
+      try {
+        extractor.release()
+      } catch (_: Exception) {
+      }
+      temporaryFile?.delete()
+    }
+  }
+
+  private fun downloadRemoteVideo(sourceFilename: String, options: ExpoVideoMetadataOptions): File {
+    val connection = URL(sourceFilename).openConnection()
+    for ((header, value) in options.headers) {
+      connection.setRequestProperty(header, value)
+    }
+
+    if (connection is HttpURLConnection) {
+      connection.connect()
+      if (connection.responseCode !in 200..299) {
+        throw RemoteVideoDownloadException(sourceFilename, connection.responseCode)
+      }
+    }
+
+    val extension = Uri.parse(sourceFilename).lastPathSegment
+      ?.substringAfterLast('.', "mp4")
+      ?.takeIf { it.isNotBlank() }
+      ?: "mp4"
+    val temporaryFile = File.createTempFile("expo-video-metadata-", ".$extension", context.cacheDir)
+
+    try {
+      connection.getInputStream().use { input ->
+        temporaryFile.outputStream().use { output ->
+          input.copyTo(output)
+        }
+      }
+    } catch (e: Exception) {
+      temporaryFile.delete()
+      throw e
+    }
+
+    return temporaryFile
   }
 
   private fun extractGPSLocation(retriever: MediaMetadataRetriever): Map<String, Double>? {
@@ -203,7 +258,7 @@ class ExpoVideoMetadataModule : Module() {
   private fun isAllowedToRead(url: String): Boolean {
     val permissionModuleInterface = appContext.filePermission
       ?: throw FilePermissionsModuleNotFound()
-    return permissionModuleInterface.getPathPermissions(context, url).contains(Permission.READ)
+    return permissionModuleInterface.getPathPermissions(context, url).contains(FilePermissionService.Permission.READ)
   }
 
   private fun getOrientation(rotation: Int?, width: Int?, height: Int?): String {
