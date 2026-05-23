@@ -79,6 +79,18 @@ function getPacketStatsSampleCount(options: VideoInfoOptions) {
     : options.packetStatsSampleCount;
 }
 
+function shouldIncludeTrack(track: InputTrack, options: VideoInfoOptions) {
+  if (track.isVideoTrack()) {
+    return options.includeVideoTracks !== false;
+  }
+
+  if (track.isAudioTrack()) {
+    return options.includeAudioTracks !== false;
+  }
+
+  return true;
+}
+
 async function getPacketStats(
   track: InputTrack,
   options: VideoInfoOptions
@@ -378,21 +390,22 @@ export async function getVideoInfo(
 
   try {
     const sourceInfo = await createSourceInfo(source, options);
-    input = new Input({
+    const mediaInput = new Input({
       formats: ALL_FORMATS,
       source: sourceInfo.source,
     });
+    input = mediaInput;
 
-    const [tracks, metadata] = await Promise.all([
-      input.getTracks(),
-      input.getMetadataTags(),
-    ]);
+    const tracks = await mediaInput.getTracks();
+    const includedTracks = tracks.filter((track) => shouldIncludeTrack(track, options));
     const [format, mimeType, start, end, trackInfo] = await Promise.all([
-      input.getFormat().then((format) => format.name),
-      input.getMimeType(),
-      safeRead(() => input!.getFirstTimestamp(tracks), 0),
-      getDuration(input, tracks, options),
-      Promise.all(tracks.map((track) => getTrackInfo(track, options))),
+      mediaInput.getFormat().then((format) => format.name),
+      mediaInput.getMimeType(),
+      includedTracks.length
+        ? safeRead(() => mediaInput.getFirstTimestamp(includedTracks), 0)
+        : 0,
+      includedTracks.length ? getDuration(mediaInput, includedTracks, options) : 0,
+      Promise.all(includedTracks.map((track) => getTrackInfo(track, options))),
     ]);
 
     const videoTrack = trackInfo.find(
@@ -401,7 +414,10 @@ export async function getVideoInfo(
     const audioTrack = trackInfo.find(
       (track): track is AudioTrackInfo => track.type === "audio"
     );
-    const metadataTags = normalizeMetadataTags(metadata);
+    const metadata = options.includeMetadataTags
+      ? await safeRead(() => mediaInput.getMetadataTags(), null)
+      : null;
+    const metadataTags = metadata ? normalizeMetadataTags(metadata) : undefined;
     const duration = Math.max(0, end - start);
     const width = videoTrack?.codedWidth ?? 0;
     const height = videoTrack?.codedHeight ?? 0;
@@ -418,7 +434,7 @@ export async function getVideoInfo(
       start,
       end,
       tracks: trackInfo,
-      metadataTags,
+      ...(options.includeMetadataTags ? { metadataTags: metadataTags ?? null } : {}),
       fileSize: sourceInfo.fileSize,
       duration,
       width,
@@ -441,7 +457,7 @@ export async function getVideoInfo(
       aspectRatio,
       is16_9: Math.abs(aspectRatio - 16 / 9) < 0.01,
       naturalOrientation: height > width ? "Portrait" : "Landscape",
-      location: findLocationInMetadata(metadata),
+      location: metadata ? findLocationInMetadata(metadata) : null,
     };
   } catch (error) {
     if (typeof source === "string" && isLocalFileSource(source)) {

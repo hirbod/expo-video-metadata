@@ -78,7 +78,7 @@ export type VideoInfoResult = {
   start: number;
   end: number;
   tracks: MediaTrackInfo[];
-  metadataTags: MetadataTagsInfo | null;
+  metadataTags?: MetadataTagsInfo | null;
   fileSize: number;
 
   /**
@@ -134,4 +134,26 @@ export type VideoInfoOptions = {
    * Defaults to `30`.
    */
   packetStatsSampleCount?: number | null;
+  /**
+   * Include container metadata tags such as title, artist, comments, embedded
+   * images, raw tags, and GPS location.
+   *
+   * Defaults to `false` because tag parsing can require extra reads and is not
+   * needed for basic technical video metadata.
+   */
+  includeMetadataTags?: boolean;
+  /**
+   * Include video tracks in the returned `tracks` array and derived video
+   * convenience fields.
+   *
+   * Defaults to `true`.
+   */
+  includeVideoTracks?: boolean;
+  /**
+   * Include audio tracks in the returned `tracks` array and derived audio
+   * convenience fields.
+   *
+   * Defaults to `true`.
+   */
+  includeAudioTracks?: boolean;
 };

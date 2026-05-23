@@ -20,9 +20,10 @@ export type {
  * Retrieves video metadata.
  *
  * @param source A local or remote URI. On web, it can also be a File or Blob.
- * @param options Pass `headers` for remote URIs. Use `exactDuration` or
- * `packetStatsSampleCount: null` when you need full scans instead of fast
- * metadata estimates.
+ * @param options Pass `headers` for remote URIs. Use `includeMetadataTags`
+ * for container tags/GPS, `includeAudioTracks` or `includeVideoTracks` to
+ * narrow extraction, and `exactDuration` or `packetStatsSampleCount: null`
+ * when you need full scans instead of fast metadata estimates.
  *
  * @return Returns a promise which fulfils with [`VideoInfoResult`](#Videoinforesult).
  */
