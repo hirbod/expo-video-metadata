@@ -2,7 +2,7 @@
 # Manual changes might be lost - proceed with caution!
 
 __metadata:
-  version: 8
+  version: 10
   cacheKey: 10c0
 
 "@ampproject/remapping@npm:^2.2.0":
@@ -5338,7 +5338,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"expo-file-system@npm:~56.0.7":
+"expo-file-system@npm:^56.0.7, expo-file-system@npm:~56.0.7":
   version: 56.0.7
   resolution: "expo-file-system@npm:56.0.7"
   peerDependencies:
@@ -5451,6 +5451,7 @@ __metadata:
   resolution: "expo-video-metadata@workspace:."
   dependencies:
     expo: "npm:^56.0.3"
+    expo-file-system: "npm:^56.0.7"
     expo-module-scripts: "npm:^56.0.2"
     mediabunny: "npm:^1.45.3"
     typescript: "npm:~6.0.3"
