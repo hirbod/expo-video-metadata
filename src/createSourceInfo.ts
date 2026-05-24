@@ -18,17 +18,9 @@ function createFileSystemSourceInfo(file: File): SourceInfo {
     source: new StreamSource({
       getSize: () => fileSize,
       read: (start, end) => {
-        const readStart = Math.max(0, Math.min(start, fileSize));
-        const readEnd = Math.max(readStart, Math.min(end, fileSize));
-        const length = readEnd - readStart;
-
-        if (length === 0) {
-          return new Uint8Array();
-        }
-
         const currentHandle = getHandle();
-        currentHandle.offset = readStart;
-        return currentHandle.readBytes(length);
+        currentHandle.offset = start;
+        return currentHandle.readBytes(end - start);
       },
       dispose: () => {
         handle?.close();
