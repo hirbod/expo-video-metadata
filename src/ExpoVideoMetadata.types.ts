@@ -92,15 +92,8 @@ export type VideoInfoResult = {
   fps: number;
   bitRate: number;
   codec: string;
-  orientation:
-    | "Portrait"
-    | "PortraitUpsideDown"
-    | "Landscape"
-    | "LandscapeRight"
-    | "LandscapeLeft";
-  naturalOrientation:
-    | "Portrait"
-    | "Landscape";
+  orientation: "Portrait" | "PortraitUpsideDown" | "Landscape" | "LandscapeRight" | "LandscapeLeft";
+  naturalOrientation: "Portrait" | "Landscape";
   aspectRatio: number;
   is16_9: boolean;
   audioSampleRate: number;

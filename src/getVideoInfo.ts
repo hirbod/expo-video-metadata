@@ -18,16 +18,12 @@ import type {
   VideoSource,
   VideoTrackInfo,
 } from "./ExpoVideoMetadata.types";
-import {
-  createSourceInfo,
-  isBlobLikeSource,
-  isLocalFileSource,
-} from "./createSourceInfo";
+import { createSourceInfo } from "./createSourceInfo";
+import { isBlobLikeSource, isLocalFileSource, safeRead } from "./utils";
 
 type Location = VideoInfoResult["location"];
 
-const ISO_6709_PATTERN =
-  /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?\/?$/;
+const ISO_6709_PATTERN = /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?\/?$/;
 const DEFAULT_PACKET_STATS_SAMPLE_COUNT = 30;
 
 // Raw location metadata keys vary by container and writer. QuickTime/iOS files
@@ -39,19 +35,7 @@ const LOCATION_METADATA_KEYS = [
   "xyz",
 ];
 
-async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await read();
-  } catch {
-    return fallback;
-  }
-}
-
-async function getDuration(
-  input: Input,
-  tracks: InputTrack[],
-  options: VideoInfoOptions
-) {
+async function getDuration(input: Input, tracks: InputTrack[], options: VideoInfoOptions) {
   if (options.exactDuration) {
     return await input.computeDuration(tracks, { skipLiveWait: true });
   }
@@ -106,18 +90,15 @@ async function getPacketStats(
   );
 }
 
-function normalizeRotation(rotation: number) {
-  return ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
-}
-
 function getOrientation(
   rotation: number,
   width: number,
   height: number
 ): VideoInfoResult["orientation"] {
   const isNaturallyPortrait = height > width;
+  const rightAngleRotation = (((Math.round(rotation / 90) * 90) % 360) + 360) % 360;
 
-  switch (normalizeRotation(rotation)) {
+  switch (rightAngleRotation) {
     case 0:
       return isNaturallyPortrait ? "Portrait" : "LandscapeRight";
     case 90:
@@ -202,30 +183,7 @@ function findLocationInMetadata(metadata: MetadataTags): Location {
   return null;
 }
 
-function normalizeVideoCodec(codec: string | null, codecParameterString: string | null) {
-  switch (codec) {
-    case "avc":
-      return "avc1";
-    case "hevc":
-      return "hev1";
-    default:
-      return codec ?? codecParameterString?.split(".")[0] ?? "";
-  }
-}
-
-function normalizeAudioCodec(codec: string | null, codecParameterString: string | null) {
-  if (codec) {
-    return codec;
-  }
-
-  if (codecParameterString?.startsWith("mp4a")) {
-    return "aac";
-  }
-
-  return codecParameterString?.split(".")[0] ?? "";
-}
-
-function normalizeMetadataTags(metadata: MetadataTags): MetadataTagsInfo | null {
+function createMetadataTagsInfo(metadata: MetadataTags): MetadataTagsInfo | null {
   const result: MetadataTagsInfo = {
     title: metadata.title,
     description: metadata.description,
@@ -264,15 +222,14 @@ async function getBaseTrackInfo(
   track: InputTrack,
   options: VideoInfoOptions
 ): Promise<BaseTrackInfo> {
-  const [codec, codecParameterString, start, end, languageCode, packetStats] =
-    await Promise.all([
-      safeRead(() => track.getCodec(), null),
-      safeRead(() => track.getCodecParameterString(), null),
-      safeRead(() => track.getFirstTimestamp(), 0),
-      safeRead(() => getTrackEnd(track, options), 0),
-      safeRead(() => track.getLanguageCode(), "und"),
-      getPacketStats(track, options),
-    ]);
+  const [codec, codecParameterString, start, end, languageCode, packetStats] = await Promise.all([
+    safeRead(() => track.getCodec(), null),
+    safeRead(() => track.getCodecParameterString(), null),
+    safeRead(() => track.getFirstTimestamp(), 0),
+    safeRead(() => getTrackEnd(track, options), 0),
+    safeRead(() => track.getLanguageCode(), "und"),
+    getPacketStats(track, options),
+  ]);
 
   return {
     type: track.type,
@@ -351,10 +308,7 @@ async function getAudioTrackInfo(
   };
 }
 
-async function getTrackInfo(
-  track: InputTrack,
-  options: VideoInfoOptions
-): Promise<MediaTrackInfo> {
+async function getTrackInfo(track: InputTrack, options: VideoInfoOptions): Promise<MediaTrackInfo> {
   if (track.isVideoTrack()) {
     return await getVideoTrackInfo(track, options);
   }
@@ -401,32 +355,24 @@ export async function getVideoInfo(
     const [format, mimeType, start, end, trackInfo] = await Promise.all([
       mediaInput.getFormat().then((format) => format.name),
       mediaInput.getMimeType(),
-      includedTracks.length
-        ? safeRead(() => mediaInput.getFirstTimestamp(includedTracks), 0)
-        : 0,
+      includedTracks.length ? safeRead(() => mediaInput.getFirstTimestamp(includedTracks), 0) : 0,
       includedTracks.length ? getDuration(mediaInput, includedTracks, options) : 0,
       Promise.all(includedTracks.map((track) => getTrackInfo(track, options))),
     ]);
 
-    const videoTrack = trackInfo.find(
-      (track): track is VideoTrackInfo => track.type === "video"
-    );
-    const audioTrack = trackInfo.find(
-      (track): track is AudioTrackInfo => track.type === "audio"
-    );
+    const videoTrack = trackInfo.find((track): track is VideoTrackInfo => track.type === "video");
+    const audioTrack = trackInfo.find((track): track is AudioTrackInfo => track.type === "audio");
     const metadata = options.includeMetadataTags
       ? await safeRead(() => mediaInput.getMetadataTags(), null)
       : null;
-    const metadataTags = metadata ? normalizeMetadataTags(metadata) : undefined;
+    const metadataTags = metadata ? createMetadataTagsInfo(metadata) : undefined;
     const duration = Math.max(0, end - start);
     const width = videoTrack?.codedWidth ?? 0;
     const height = videoTrack?.codedHeight ?? 0;
     const aspectRatio = width > 0 && height > 0 ? width / height : 0;
     const bitRate =
       videoTrack?.packetStats?.averageBitrate ??
-      (sourceInfo.fileSize && duration
-        ? Math.floor((sourceInfo.fileSize * 8) / duration)
-        : 0);
+      (sourceInfo.fileSize && duration ? Math.floor((sourceInfo.fileSize * 8) / duration) : 0);
 
     return {
       format,
@@ -443,12 +389,8 @@ export async function getVideoInfo(
       hasAudio: Boolean(audioTrack),
       audioSampleRate: audioTrack?.sampleRate ?? 0,
       isHDR: videoTrack?.colorSpace.hdr ?? null,
-      audioCodec: audioTrack
-        ? normalizeAudioCodec(audioTrack.codec, audioTrack.codecParameterString)
-        : "",
-      codec: videoTrack
-        ? normalizeVideoCodec(videoTrack.codec, videoTrack.codecParameterString)
-        : "",
+      audioCodec: audioTrack?.codec ?? "",
+      codec: videoTrack?.codec ?? "",
       audioChannels: audioTrack?.numberOfChannels ?? 0,
       fps: videoTrack?.packetStats?.averagePacketRate ?? 0,
       orientation: videoTrack

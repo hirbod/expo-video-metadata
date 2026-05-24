@@ -2,12 +2,34 @@
   "name": "expo-video-metadata",
   "version": "3.0.0",
   "description": "Video metadata parser for Expo and React Native",
+  "keywords": [
+    "ExpoVideoMetadata",
+    "expo",
+    "expo-video-metadata",
+    "metadata",
+    "react native",
+    "react-native",
+    "video",
+    "video metadata",
+    "video module"
+  ],
+  "homepage": "https://github.com/hirbod/expo-video-metadata#readme",
+  "bugs": {
+    "url": "https://github.com/hirbod/expo-video-metadata/issues"
+  },
+  "license": "MIT",
+  "author": "Hirbod Mirjavadi (https://github.com/hirbod)",
+  "repository": "https://github.com/hirbod/expo-video-metadata",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "scripts": {
     "build": "expo-module build",
     "clean": "expo-module clean",
-    "lint": "expo-module lint",
+    "lint": "oxlint --type-aware src example/App.tsx",
+    "lint:fix": "oxlint --type-aware --fix src example/App.tsx",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsgo -p tsconfig.json --noEmit && tsgo -p example/tsconfig.json --noEmit",
     "test": "expo-module test",
     "prepare": "expo-module prepare",
     "prepublishOnly": "expo-module prepublishOnly",
@@ -15,27 +37,17 @@
     "open:ios": "open -a \"Xcode\" example/ios",
     "open:android": "open -a \"Android Studio\" example/android"
   },
-  "keywords": [
-    "react-native",
-    "expo",
-    "expo-video-metadata",
-    "ExpoVideoMetadata",
-    "react native",
-    "video module",
-    "video metadata",
-    "video",
-    "metadata"
-  ],
-  "repository": "https://github.com/hirbod/expo-video-metadata",
-  "bugs": {
-    "url": "https://github.com/hirbod/expo-video-metadata/issues"
+  "dependencies": {
+    "expo-file-system": "^56.0.7",
+    "mediabunny": "^1.45.3"
   },
-  "author": "Hirbod Mirjavadi (https://github.com/hirbod)",
-  "license": "MIT",
-  "homepage": "https://github.com/hirbod/expo-video-metadata#readme",
   "devDependencies": {
+    "@typescript/native-preview": "^7.0.0-dev.20260521.1",
     "expo": "^56.0.3",
     "expo-module-scripts": "^56.0.2",
+    "oxfmt": "^0.51.0",
+    "oxlint": "^1.66.0",
+    "oxlint-tsgolint": "^0.23.0",
     "typescript": "~6.0.3"
   },
   "peerDependencies": {
@@ -43,9 +55,5 @@
     "react": "*",
     "react-native": "*"
   },
-  "packageManager": "yarn@4.15.0",
-  "dependencies": {
-    "expo-file-system": "^56.0.7",
-    "mediabunny": "^1.45.3"
-  }
+  "packageManager": "yarn@4.15.0"
 }
