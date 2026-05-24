@@ -1,6 +1,7 @@
 {
   "name": "expo-video-metadata-example",
   "version": "1.2.1",
+  "private": true,
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
@@ -25,11 +26,10 @@
     "@types/react": "~19.2.14",
     "typescript": "~6.0.3"
   },
-  "private": true,
+  "packageManager": "yarn@4.15.0",
   "expo": {
     "autolinking": {
       "nativeModulesDir": ".."
     }
-  },
-  "packageManager": "yarn@4.15.0"
+  }
 }

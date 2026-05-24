@@ -35,8 +35,7 @@ Remote URLs are read through Mediabunny's URL source. Request headers can be pas
 On iOS, picking videos with `expo-image-picker` is fastest when you keep the original asset representation:
 
 ```ts
-preferredAssetRepresentationMode:
-  ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
+preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current;
 ```
 
 That avoids unnecessary copying or transcoding before metadata is read.
@@ -171,12 +170,7 @@ type VideoInfoResult = {
   fps: number;
   bitRate: number;
   codec: string;
-  orientation:
-    | "Portrait"
-    | "PortraitUpsideDown"
-    | "Landscape"
-    | "LandscapeRight"
-    | "LandscapeLeft";
+  orientation: "Portrait" | "PortraitUpsideDown" | "Landscape" | "LandscapeRight" | "LandscapeLeft";
   naturalOrientation: "Portrait" | "Landscape";
   aspectRatio: number;
   is16_9: boolean;
@@ -256,6 +250,12 @@ Some fields depend on what the file actually exposes and what options you pass.
 For example, `metadataTags` and `location` are only read when
 `includeMetadataTags` is `true`, and location is only returned when the video
 contains a readable GPS tag.
+
+Codec values come directly from Mediabunny. Use `track.codec` for the short
+codec identifier, such as `avc` or `aac`, and `track.codecParameterString` for
+the full codec string, such as `avc1.640034` or `mp4a.40.2`. The legacy
+convenience fields `codec` and `audioCodec` mirror the primary video and audio
+track `codec` values.
 
 ## Example With Expo Image Picker
 

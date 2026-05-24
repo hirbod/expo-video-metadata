@@ -1,5 +1,4 @@
 import * as ImagePicker from "expo-image-picker";
-import { getVideoInfoAsync } from "expo-video-metadata";
 import type {
   AudioTrackInfo,
   MediaTrackInfo,
@@ -7,6 +6,7 @@ import type {
   VideoInfoResult,
   VideoTrackInfo,
 } from "expo-video-metadata";
+import { getVideoInfoAsync } from "expo-video-metadata";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -17,10 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 type DisplayValue =
   | string
@@ -37,12 +34,7 @@ const DEMO_OPTIONS = {
 };
 
 function isMetadataImage(value: unknown): value is MetadataImageInfo {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    "mimeType" in value &&
-    "data" in value
-  );
+  return value !== null && typeof value === "object" && "mimeType" in value && "data" in value;
 }
 
 function isVideoTrack(track: MediaTrackInfo): track is VideoTrackInfo {
@@ -54,8 +46,7 @@ function isAudioTrack(track: MediaTrackInfo): track is AudioTrackInfo {
 }
 
 function bytesToBase64(bytes: Uint8Array) {
-  const alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let output = "";
 
   for (let index = 0; index < bytes.length; index += 3) {
@@ -184,19 +175,10 @@ function MetadataValue({
   if (Array.isArray(value)) {
     return (
       <View
-        style={[
-          styles.list,
-          isGroupValue && styles.groupList,
-          depth === 1 && styles.topLevelGroup,
-        ]}
+        style={[styles.list, isGroupValue && styles.groupList, depth === 1 && styles.topLevelGroup]}
       >
         {value.map((item, index) => (
-          <MetadataRow
-            key={index}
-            depth={depth + 1}
-            label={`${index + 1}`}
-            value={item}
-          />
+          <MetadataRow key={index} depth={depth + 1} label={`${index + 1}`} value={item} />
         ))}
       </View>
     );
@@ -205,11 +187,7 @@ function MetadataValue({
   if (value && typeof value === "object") {
     return (
       <View
-        style={[
-          styles.list,
-          isGroupValue && styles.groupList,
-          depth === 1 && styles.topLevelGroup,
-        ]}
+        style={[styles.list, isGroupValue && styles.groupList, depth === 1 && styles.topLevelGroup]}
       >
         {Object.entries(value).map(([key, item]) => (
           <MetadataRow key={key} depth={depth + 1} label={key} value={item} />
@@ -238,30 +216,16 @@ function MetadataRow({
 
   if (isNested) {
     return (
-      <View
-        style={[
-          styles.groupRow,
-          depth > 1 && { marginLeft: Math.min((depth - 1) * 4, 12) },
-        ]}
-      >
-        <Text style={[styles.groupLabel, depth > 1 && styles.labelNested]}>
-          {label}:
-        </Text>
+      <View style={[styles.groupRow, depth > 1 && { marginLeft: Math.min((depth - 1) * 4, 12) }]}>
+        <Text style={[styles.groupLabel, depth > 1 && styles.labelNested]}>{label}:</Text>
         <MetadataValue depth={depth} isGroupValue value={value} />
       </View>
     );
   }
 
   return (
-    <View
-      style={[
-        styles.row,
-        depth > 1 && { marginLeft: Math.min((depth - 1) * 4, 12) },
-      ]}
-    >
-      <Text style={[styles.label, depth > 1 && styles.labelNested]}>
-        {label}:{" "}
-      </Text>
+    <View style={[styles.row, depth > 1 && { marginLeft: Math.min((depth - 1) * 4, 12) }]}>
+      <Text style={[styles.label, depth > 1 && styles.labelNested]}>{label}: </Text>
       <MetadataValue depth={depth} isGroupValue={isNested} value={value} />
     </View>
   );
@@ -293,21 +257,22 @@ function AppContent() {
     setFileName(asset.fileName ?? asset.uri);
 
     try {
-      setResult(await getVideoInfoAsync(asset.file ?? asset.uri, DEMO_OPTIONS));
+      const result = await getVideoInfoAsync(asset.file ?? asset.uri, DEMO_OPTIONS);
+      setResult(result);
     } finally {
       setIsLoading(false);
     }
   }
 
   async function loadRemoteVideo() {
-    const url =
-      "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
+    const url = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
 
     setIsLoading(true);
     setFileName(url);
 
     try {
-      setResult(await getVideoInfoAsync(url, DEMO_OPTIONS));
+      const result = await getVideoInfoAsync(url, DEMO_OPTIONS);
+      setResult(result);
     } finally {
       setIsLoading(false);
     }
@@ -331,28 +296,15 @@ function AppContent() {
     >
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.actions}>
-          <Pressable
-            style={styles.button}
-            disabled={isLoading}
-            onPress={loadPickedVideo}
-          >
+          <Pressable style={styles.button} disabled={isLoading} onPress={loadPickedVideo}>
             <Text style={styles.buttonText}>Select file</Text>
           </Pressable>
-          <Pressable
-            style={styles.button}
-            disabled={isLoading}
-            onPress={loadRemoteVideo}
-          >
+          <Pressable style={styles.button} disabled={isLoading} onPress={loadRemoteVideo}>
             <Text style={styles.buttonText}>Load URL</Text>
           </Pressable>
           {(result || fileName || isLoading) && (
-            <Pressable
-              style={[styles.button, styles.secondaryButton]}
-              onPress={reset}
-            >
-              <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-                Reset
-              </Text>
+            <Pressable style={[styles.button, styles.secondaryButton]} onPress={reset}>
+              <Text style={[styles.buttonText, styles.secondaryButtonText]}>Reset</Text>
             </Pressable>
           )}
         </View>
