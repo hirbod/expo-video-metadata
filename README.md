@@ -8,7 +8,7 @@ pixel aspect ratio, display dimensions, color space, packet statistics, audio
 properties, metadata tags, embedded images, file size, and GPS location when the
 file contains it.
 
-It is currently maintained against **Expo SDK 56**.
+It is currently maintained against **Expo SDK 57**.
 
 <img src="https://raw.githubusercontent.com/hirbod/expo-video-metadata/assets/preview_2026_mediabunny.png" width="800" />
 
