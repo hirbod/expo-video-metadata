@@ -10,19 +10,18 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "babel-plugin-module-resolver": "^5.0.2",
-    "expo": "^56.0.3",
-    "expo-image-picker": "~56.0.12",
-    "expo-splash-screen": "~56.0.9",
-    "expo-system-ui": "~56.0.5",
+    "babel-plugin-module-resolver": "^5.0.3",
+    "expo": "^57.0.20",
+    "expo-image-picker": "~57.0.16",
+    "expo-splash-screen": "~57.0.8",
+    "expo-system-ui": "~57.0.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-native": "0.85.3",
+    "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-web": "^0.21.2"
+    "react-native-web": "~0.21.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.0",
     "@types/react": "~19.2.14",
     "typescript": "~6.0.3"
   },
